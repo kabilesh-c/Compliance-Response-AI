@@ -1,0 +1,17 @@
+{
+  "name": "pharmacy-vs",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "cd apps/web && npm run dev",
+    "dev:web": "cd apps/web && npm run dev",
+    "build:web": "npm --workspace apps/web run build",
+    "start:web": "npm --workspace apps/web run start"
+  },
+  "dependencies": {
+    "framer-motion": "^12.23.26"
+  }
+}
