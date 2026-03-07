@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Home, LogOut, Pill, LucideIcon } from "lucide-react";
 import { useAuthStore, UserRole } from "@/stores/authStore";
+import { logout as firebaseLogout } from "@/lib/auth";
 
 export interface NavItem {
   icon: LucideIcon;
@@ -21,9 +22,22 @@ export default function Sidebar({ navItems, role }: SidebarProps) {
   const router = useRouter();
   const { user, logout } = useAuthStore();
 
-  const handleLogout = () => {
-    logout();
-    router.push("/login");
+  const handleLogout = async () => {
+    try {
+      // Logout from Firebase
+      await firebaseLogout();
+      
+      // Logout from auth store (clears local state)
+      logout();
+      
+      // Redirect to login page
+      router.push("/login");
+    } catch (error) {
+      console.error("Logout error:", error);
+      // Even if Firebase logout fails, still clear local state
+      logout();
+      router.push("/login");
+    }
   };
 
   const getThemeColor = (role: UserRole) => {

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/authStore";
 import { authApi } from "@/lib/api";
+import { signInWithEmail, signInWithGoogle } from "@/lib/auth";
 import { Check, Info, ArrowRight, Building2, ArrowLeft } from "lucide-react";
 
 export default function LoginPage() {
@@ -25,8 +26,9 @@ export default function LoginPage() {
     setError("");
     setIsLoading(true);
 
-    // --- DEMO MODE: Accept any password for demo emails ---
-    // This allows login even if the backend is down or database is empty
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // --- DEMO MODE USERS ---
     const demoUsers: Record<string, { role: "ADMIN" | "MANAGER" | "PHARMACIST"; name: string; mode: "RETAIL" | "HOSPITAL" }> = {
       // Retail Mode
       "admin@pharmacy.com": { role: "ADMIN", name: "Retail Admin", mode: "RETAIL" },
@@ -38,12 +40,10 @@ export default function LoginPage() {
       "staff@hospital.com": { role: "PHARMACIST", name: "Hospital Staff", mode: "HOSPITAL" },
     };
 
-    const normalizedEmail = email.toLowerCase().trim();
     const demoUser = demoUsers[normalizedEmail];
     
-    // Demo mode: If email matches a demo user, accept ANY password
+    // If it's a demo user, use demo mode (accept any password)
     if (demoUser) {
-      // Simulate API delay
       await new Promise(resolve => setTimeout(resolve, 300));
 
       const user = {
@@ -56,8 +56,6 @@ export default function LoginPage() {
 
       login(user, "demo-token-12345");
       setMode(demoUser.mode);
-
-      // Wait for state to persist before navigating
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // Redirect logic based on mode and role
@@ -70,7 +68,6 @@ export default function LoginPage() {
           default: targetPath = "/hospital/staff"; break;
         }
       } else {
-        // Retail mode
         switch (demoUser.role) {
           case "ADMIN": targetPath = "/admin"; break;
           case "MANAGER": targetPath = "/manager"; break;
@@ -86,31 +83,51 @@ export default function LoginPage() {
     // ---------------------------------
 
     try {
-      // Real API Login
-      const response = await authApi.login(email, password);
-      const { user: apiUser, token } = response;
+      // Step 1: Try Firebase authentication
+      const firebaseUser = await signInWithEmail(email, password);
+      
+      // Step 2: Get Firebase ID token
+      const token = await firebaseUser.getIdToken();
 
-      // Determine mode based on organization type (if available) or email fallback
-      let mode: "RETAIL" | "HOSPITAL" = "RETAIL";
-      if (apiUser.organization?.type === "HOSPITAL" || email.includes("hospital")) {
-        mode = "HOSPITAL";
+      // Step 3: Try to get user data from backend API (optional)
+      let userData;
+      let userMode: "RETAIL" | "HOSPITAL" = "RETAIL";
+      
+      try {
+        const response = await authApi.login(email, password);
+        const { user: apiUser } = response;
+
+        // Determine mode from organization type
+        if (apiUser.organization?.type === "HOSPITAL" || email.includes("hospital")) {
+          userMode = "HOSPITAL";
+        }
+
+        userData = {
+          id: apiUser.id,
+          name: `${apiUser.firstName} ${apiUser.lastName}`,
+          email: apiUser.email,
+          role: apiUser.role,
+          organizationId: apiUser.organizationId
+        };
+      } catch (apiError) {
+        // If backend fails, use Firebase user data
+        console.warn("Backend login failed, using Firebase user:", apiError);
+        userData = {
+          id: firebaseUser.uid,
+          email: firebaseUser.email || "",
+          name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
+          role: "PHARMACIST" as const, // Default role
+          organizationId: undefined
+        };
       }
 
-      const user = {
-        id: apiUser.id,
-        name: `${apiUser.firstName} ${apiUser.lastName}`,
-        email: apiUser.email,
-        role: apiUser.role,
-        organizationId: apiUser.organizationId
-      };
-      
-      // Use auth store to persist login
-      login(user, token);
-      setMode(mode);
-      
-      // Redirect based on role and mode
-      const role = apiUser.role;
-      if (mode === "HOSPITAL") {
+      // Step 4: Login with auth store
+      login(userData, token);
+      setMode(userMode);
+
+      // Step 5: Redirect based on role and mode
+      const role = userData.role;
+      if (userMode === "HOSPITAL") {
         switch (role) {
           case "ADMIN":
           case "SUPER_ADMIN":
@@ -146,8 +163,7 @@ export default function LoginPage() {
         }
       }
     } catch (err: any) {
-      // Silently handle error in demo mode
-      setError("Login failed. Please use one of the demo credentials below.");
+      setError(err.message || "Login failed. Please use one of the demo credentials below.");
     } finally {
       setIsLoading(false);
     }
@@ -199,6 +215,39 @@ export default function LoginPage() {
     }
     
     router.push(targetPath);
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError("");
+    setIsLoading(true);
+
+    try {
+      // Step 1: Sign in with Google
+      const firebaseUser = await signInWithGoogle();
+      
+      // Step 2: Get Firebase ID token
+      const token = await firebaseUser.getIdToken();
+
+      // Step 3: Create user data (default to RETAIL / PHARMACIST)
+      const userData = {
+        id: firebaseUser.uid,
+        email: firebaseUser.email || "",
+        name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
+        role: "PHARMACIST" as const, // Default role for Google sign-in
+        organizationId: undefined
+      };
+
+      // Step 4: Login and set mode
+      login(userData, token);
+      setMode("RETAIL"); // Default to RETAIL mode
+
+      // Step 5: Redirect to default dashboard
+      router.push("/pos"); // Default to POS for pharmacist
+    } catch (err: any) {
+      setError(err.message || "Google sign-in failed");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -317,6 +366,42 @@ export default function LoginPage() {
                   Sign In <ArrowRight size={20} />
                 </>
               )}
+            </button>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-neutral-200"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-white text-neutral-500">Or</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleGoogleSignIn}
+              disabled={isLoading}
+              className="w-full py-3 bg-white border-2 border-neutral-200 text-neutral-900 font-semibold rounded-xl hover:bg-neutral-50 hover:border-primary-yellow transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24">
+                <path
+                  fill="#4285F4"
+                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                />
+              </svg>
+              Continue with Google
             </button>
 
             <div className="text-center text-sm text-neutral-500">
