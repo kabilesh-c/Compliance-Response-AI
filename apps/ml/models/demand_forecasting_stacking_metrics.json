@@ -1,0 +1,18 @@
+{
+  "mae": 67.25109883257333,
+  "rmse": 80.27848810280707,
+  "mape": 1.2960579256032334,
+  "smape": 1.2949229684744628,
+  "r2_score": 0.9672450255103174,
+  "explained_variance": 0.9678887591692632,
+  "within_20pct": 1.0,
+  "within_10pct": 1.0,
+  "within_5pct": 1.0,
+  "bias": 11.25417491682057,
+  "median_ae": 59.93537404963172,
+  "max_error": 141.92563003449322,
+  "test_samples": 14,
+  "mean_actual": 5307.214285714285,
+  "mean_predicted": 5318.468460631106,
+  "model_type": "Stacking Ensemble (LightGBM + XGBoost + CatBoost)"
+}

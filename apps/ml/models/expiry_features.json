@@ -1,0 +1,1 @@
+["medicine_id", "supplier", "days_until_expiry", "stock_quantity", "unit_price", "total_value", "estimated_daily_usage", "days_to_sellout", "months_until_expiry", "stock_rotation_ratio", "is_fast_moving", "is_expensive", "is_large_batch", "is_short_shelf_life"]
