@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Copy, RefreshCw, ChevronLeft, ChevronRight, Download, FileText } from 'lucide-react';
+import { Copy, RefreshCw, ChevronLeft, ChevronRight, Download, ChevronDown } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { regenerateSingleQuestion } from '@/services/aiAssistantApi';
 
@@ -39,22 +39,27 @@ interface QuestionnaireResultProps {
   data: StructuredResponse;
   sessionId?: string;
   questionnaireDocumentType?: 'pdf' | 'docx' | 'md';
+  questionnaireFileName?: string;
 }
 
 export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
   data,
   sessionId,
   questionnaireDocumentType = 'pdf',
+  questionnaireFileName = 'questionnaire-response',
 }) => {
   // Version management: Store all versions for each question
   const [versionedAnswers, setVersionedAnswers] = useState<Map<number, VersionedAnswer>>(new Map());
   
   // Editing state
   const [editingQuestionNumber, setEditingQuestionNumber] = useState<number | null>(null);
-  const [editedContent, setEditedContent] = useState<{ [key: number]: string }>({});
+  const editableRefs = useRef<Map<number, HTMLDivElement | null>>(new Map());
   
   // Loading state for regenerations
   const [regenerating, setRegenerating] = useState<Set<number>>(new Set());
+  
+  // Download dropdown state
+  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
 
   // Initialize versions on mount
   useEffect(() => {
@@ -129,41 +134,52 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
     });
   };
 
-  // Handle edit mode
-  const handleEditStart = (questionNumber: number, currentText: string) => {
+  // Handle edit mode (contentEditable approach like ChatGPT)
+  const handleEditStart = (questionNumber: number) => {
     setEditingQuestionNumber(questionNumber);
-    setEditedContent((prev) => ({ ...prev, [questionNumber]: currentText }));
+    // Focus the contentEditable div
+    setTimeout(() => {
+      const el = editableRefs.current.get(questionNumber);
+      if (el) {
+        el.focus();
+        // Place cursor at end
+        const range = document.createRange();
+        const sel = window.getSelection();
+        range.selectNodeContents(el);
+        range.collapse(false);
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+    }, 0);
   };
 
-  // Auto-save edited content
-  useEffect(() => {
-    const autoSave = () => {
-      if (editingQuestionNumber !== null && editedContent[editingQuestionNumber]) {
-        // Update the current version's answer text
-        setVersionedAnswers((prev) => {
-          const updated = new Map(prev);
-          const versioned = updated.get(editingQuestionNumber);
-          if (versioned) {
-            const currentVersion = versioned.versions[versioned.currentVersionIndex];
-            currentVersion.answerText = editedContent[editingQuestionNumber];
-          }
-          return updated;
-        });
+  // Handle content change in contentEditable
+  const handleContentEdit = (questionNumber: number) => {
+    const el = editableRefs.current.get(questionNumber);
+    if (!el) return;
+    
+    const newContent = el.innerText; // Use innerText to get plain text
+    
+    // Update version with new content
+    setVersionedAnswers((prev) => {
+      const updated = new Map(prev);
+      const versioned = updated.get(questionNumber);
+      if (versioned) {
+        const currentVersion = versioned.versions[versioned.currentVersionIndex];
+        currentVersion.answerText = newContent;
       }
-    };
-
-    // Auto-save 500ms after user stops typing
-    const timer = setTimeout(autoSave, 500);
-    return () => clearTimeout(timer);
-  }, [editedContent, editingQuestionNumber]);
+      return updated;
+    });
+  };
 
   // Handle blur (exit edit mode)
-  const handleEditBlur = () => {
+  const handleEditBlur = (questionNumber: number) => {
+    handleContentEdit(questionNumber); // Save on blur
     setEditingQuestionNumber(null);
   };
 
   // Download functionality
-  const handleDownload = async (format: 'pdf' | 'docx') => {
+  const handleDownload = async (format: 'markdown' | 'pdf' | 'docx') => {
     // Generate formatted content using current versions
     let content = `# Questionnaire Response\n\n`;
     content += `## Summary\n${data.summary}\n\n`;
@@ -193,27 +209,39 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
         content += `---\n\n`;
       });
 
-    if (format === 'docx') {
-      // For Word format, we'd use a library like docx or html-docx-js
-      // For now, download as plain text
-      const blob = new Blob([content], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `questionnaire-response.docx`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } else {
-      // PDF download would require a library like jsPDF or pdfmake
-      // For now, download as markdown
+    // Generate filename from uploaded file name
+    const baseFileName = questionnaireFileName.replace(/\.(pdf|docx|md)$/, '');
+    
+    if (format === 'markdown') {
       const blob = new Blob([content], { type: 'text/markdown' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `questionnaire-response.md`;
+      a.download = `${baseFileName}-response.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } else if (format === 'pdf') {
+      // For PDF, download as markdown for now (proper PDF would need jsPDF)
+      const blob = new Blob([content], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${baseFileName}-response.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } else if (format === 'docx') {
+      // Create properly formatted plain text for Word
+      const plainText = content.replace(/[#*`]/g, '').replace(/---/g, '\n');
+      const blob = new Blob([plainText], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${baseFileName}-response.txt`;
       a.click();
       URL.revokeObjectURL(url);
     }
+    
+    setShowDownloadMenu(false);
   };
 
   return (
@@ -224,7 +252,7 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
         animate={{ opacity: 1, y: 0 }}
         className="prose prose-sm max-w-none dark:prose-invert"
       >
-        <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{data.summary}</p>
+        <p className="text-gray-800 dark:text-gray-100 leading-relaxed text-base font-medium">{data.summary}</p>
       </motion.div>
 
       {/* Stats Panel */}
@@ -271,13 +299,8 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
                 className={`group relative p-6 rounded-lg border transition-all duration-200 ${
                   answer.status === 'not_found'
                     ? 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800'
-                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-700'
+                    : 'bg-gray-50 dark:bg-gray-800/60 border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600'
                 } ${isEditing ? 'ring-2 ring-blue-500 dark:ring-blue-400' : ''}`}
-                onClick={(e) => {
-                  if (!isEditing && e.target === e.currentTarget) {
-                    handleEditStart(answer.questionNumber, answer.answerText);
-                  }
-                }}
               >
                 {/* Serial Number Badge */}
                 <div className="absolute -top-3 -left-3 w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-lg">
@@ -291,29 +314,38 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
                   </h3>
                 </div>
 
-                {/* Answer (Editable) */}
-                {isEditing ? (
-                  <textarea
-                    value={editedContent[answer.questionNumber] || answer.answerText}
-                    onChange={(e) => {
-                      setEditedContent((prev) => ({
-                        ...prev,
-                        [answer.questionNumber]: e.target.value,
-                      }));
-                    }}
-                    onBlur={handleEditBlur}
-                    autoFocus
-                    className="w-full mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-300 dark:border-blue-700 rounded-lg text-gray-900 dark:text-gray-100 text-sm leading-relaxed resize-y min-h-[150px] focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                ) : (
-                  <div
-                    onClick={() => handleEditStart(answer.questionNumber, answer.answerText)}
-                    className="prose prose-sm max-w-none dark:prose-invert mb-4 cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-900/10 p-3 rounded transition-colors"
-                    title="Click to edit"
-                  >
-                    <ReactMarkdown>{answer.answerText}</ReactMarkdown>
-                  </div>
-                )}
+                {/* Answer (ContentEditable - ChatGPT style) */}
+                <div
+                  ref={(el) => {
+                    if (el) editableRefs.current.set(answer.questionNumber, el);
+                  }}
+                  contentEditable={isEditing}
+                  suppressContentEditableWarning
+                  onInput={() => isEditing && handleContentEdit(answer.questionNumber)}
+                  onBlur={() => handleEditBlur(answer.questionNumber)}
+                  onClick={(e) => {
+                    if (!isEditing) {
+                      e.stopPropagation();
+                      handleEditStart(answer.questionNumber);
+                    }
+                  }}
+                  className={`mb-4 p-3 rounded-lg transition-all cursor-pointer ${
+                    isEditing 
+                      ? 'bg-gray-100 dark:bg-gray-700/50 ring-2 ring-blue-500 dark:ring-blue-400'
+                      : 'bg-gray-100/50 dark:bg-gray-700/30 hover:bg-gray-100 dark:hover:bg-gray-700/40'
+                  }`}
+                  title={isEditing ? 'Editing...' : 'Click to edit'}
+                  style={{
+                    minHeight: '80px',
+                    outline: 'none',
+                  }}
+                >
+                  {!isEditing && (
+                    <div className="prose prose-sm max-w-none dark:prose-invert">
+                      <ReactMarkdown>{answer.answerText}</ReactMarkdown>
+                    </div>
+                  )}
+                </div>
 
                 {/* Confidence Bar */}
                 <div className="mb-4">
@@ -339,7 +371,7 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
 
                 {/* Citations */}
                 {answer.citations.length > 0 && (
-                  <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-900/50 rounded border border-gray-200 dark:border-gray-700">
+                  <div className="mb-4 p-3 bg-gray-100/70 dark:bg-gray-700/40 rounded border border-gray-200 dark:border-gray-600">
                     <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
                       References:
                     </div>
@@ -347,7 +379,7 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
                       {answer.citations.map((cite, idx) => (
                         <div key={idx} className="text-xs text-gray-600 dark:text-gray-400">
                           {idx + 1}. {cite.document}
-                          {cite.page && <span className="text-gray-500"> (Page {cite.page})</span>}
+                          {cite.page && <span className="text-gray-500 dark:text-gray-500"> (Page {cite.page})</span>}
                         </div>
                       ))}
                     </div>
@@ -415,22 +447,50 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3 }}
-        className="flex justify-center gap-4 pt-6 border-t border-gray-200 dark:border-gray-700"
+        className="flex justify-center pt-6 border-t border-gray-200 dark:border-gray-700"
       >
-        <button
-          onClick={() => handleDownload('pdf')}
-          className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-lg font-medium transition-all shadow-lg hover:shadow-xl"
-        >
-          <FileText className="w-5 h-5" />
-          Download as PDF
-        </button>
-        <button
-          onClick={() => handleDownload('docx')}
-          className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg font-medium transition-all shadow-lg hover:shadow-xl"
-        >
-          <Download className="w-5 h-5" />
-          Download as Word
-        </button>
+        <div className="relative">
+          <button
+            onClick={() => setShowDownloadMenu(!showDownloadMenu)}
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg font-medium transition-all shadow-lg hover:shadow-xl"
+          >
+            <Download className="w-5 h-5" />
+            <ChevronDown className={`w-4 h-4 transition-transform ${showDownloadMenu ? 'rotate-180' : ''}`} />
+          </button>
+          
+          <AnimatePresence>
+            {showDownloadMenu && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="absolute bottom-full mb-2 right-0 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden min-w-[200px]"
+              >
+                <button
+                  onClick={() => handleDownload('markdown')}
+                  className="w-full px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300 text-sm"
+                >
+                  <div className="font-medium">Default ({questionnaireFileName})</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Markdown format</div>
+                </button>
+                <button
+                  onClick={() => handleDownload('pdf')}
+                  className="w-full px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300 text-sm border-t border-gray-200 dark:border-gray-700"
+                >
+                  <div className="font-medium">PDF</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Portable Document Format</div>
+                </button>
+                <button
+                  onClick={() => handleDownload('docx')}
+                  className="w-full px-4 py-3 text-left hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300 text-sm border-t border-gray-200 dark:border-gray-700"
+                >
+                  <div className="font-medium">Word</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Plain text format</div>
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </motion.div>
     </div>
   );
