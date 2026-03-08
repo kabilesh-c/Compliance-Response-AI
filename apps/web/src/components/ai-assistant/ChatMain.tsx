@@ -534,10 +534,6 @@ export default function ChatMain({ initialMessage, uploadedFiles, sessionId: ext
                         }}
                         sessionId={sessionId}
                         questionnaireDocumentType="pdf"
-                        questionnaireFileName={
-                          message.attachedFiles?.find(f => f.type === 'questionnaire')?.name || 
-                          'questionnaire-response'
-                        }
                       />
                     </div>
                   ) : message.questionCards && message.questionCards.length > 0 ? (
