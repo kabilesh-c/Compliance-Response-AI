@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Send, Mic, FileUp, Copy, ThumbsUp, ThumbsDown, RotateCcw, MoreHorizontal, Loader2, FileText, Download, X, Eye, ChevronLeft, ChevronRight, Check, Edit3 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { sendChatMessage, getChatSession, getQuestions, exportQuestionnaire, regenerateSingleQuestion, StructuredAnswerItem, StructuredAnswersResponse } from "@/services/aiAssistantApi";
+import { sendChatMessage, getChatSession, getQuestions, exportQuestionnaire, regenerateSingleQuestion, uploadQuestionnaire, uploadReferenceDocument, getDocumentStatus, StructuredAnswerItem, StructuredAnswersResponse } from "@/services/aiAssistantApi";
 
 interface ChatMainProps {
   initialMessage: string;
@@ -61,8 +61,10 @@ export default function ChatMain({ initialMessage, uploadedFiles, sessionId: ext
   const [previewFile, setPreviewFile] = useState<{ name: string; documentId?: string; questions: string[] } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<Array<{file: File; status: 'uploading' | 'processing' | 'ready' | 'error'; documentId?: string; type: 'questionnaire' | 'reference'}>>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const initialMessageSent = useRef(false);
   const firstMessageFiles = useRef(uploadedFiles);
   // Track session IDs created within this component instance so we don't
@@ -136,22 +138,34 @@ export default function ChatMain({ initialMessage, uploadedFiles, sessionId: ext
   }, [initialMessage]);
 
   const sendUserMessage = async (text: string) => {
-    // Attach files to the first message only
+    // Attach files from first message OR from pending attachments
     const isFirstMessage = messages.filter(m => m.role === "user").length === 0;
-    const filesToAttach = isFirstMessage && firstMessageFiles.current.length > 0
+    const firstMsgFiles = isFirstMessage && firstMessageFiles.current.length > 0
       ? firstMessageFiles.current.map(f => ({ name: f.name, type: f.type, documentId: f.documentId }))
-      : undefined;
+      : [];
+    const pendingFiles = pendingAttachments.filter(a => a.status === 'ready').map(a => ({ 
+      name: a.file.name, 
+      type: a.type, 
+      documentId: a.documentId 
+    }));
+    const filesToAttach = [...firstMsgFiles, ...pendingFiles];
 
     // Pass the questionnaire documentId so the backend can find questions reliably
     const questionnaireFile = isFirstMessage
       ? firstMessageFiles.current.find(f => f.type === 'questionnaire' && f.documentId)
-      : undefined;
+      : pendingAttachments.find(a => a.type === 'questionnaire' && a.documentId);
 
-    const userMsg: Message = { id: Date.now().toString(), role: "user", content: text, attachedFiles: filesToAttach };
+    const userMsg: Message = { 
+      id: Date.now().toString(), 
+      role: "user", 
+      content: text, 
+      attachedFiles: filesToAttach.length > 0 ? filesToAttach : undefined 
+    };
     const aiId = (Date.now() + 1).toString();
 
     setMessages(prev => [...prev, userMsg]);
     setIsLoading(true);
+    setPendingAttachments([]); // Clear pending attachments after sending
 
     // Add a streaming AI placeholder
     setMessages(prev => [...prev, { id: aiId, role: "ai", content: "", isStreaming: true }]);
@@ -221,8 +235,9 @@ export default function ChatMain({ initialMessage, uploadedFiles, sessionId: ext
   };
 
   const handleSend = () => {
-    if (!inputValue.trim() || isLoading) return;
-    const text = inputValue;
+    const hasReadyAttachments = pendingAttachments.some(a => a.status === 'ready');
+    if ((!inputValue.trim() && !hasReadyAttachments) || isLoading) return;
+    const text = inputValue.trim() || (hasReadyAttachments ? "Analyze the uploaded documents" : "");
     setInputValue("");
     sendUserMessage(text);
   };
@@ -379,6 +394,61 @@ export default function ChatMain({ initialMessage, uploadedFiles, sessionId: ext
     } finally {
       setExportLoading(false);
     }
+  };
+
+  const handleFileSelect = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    
+    const file = files[0];
+    const tempIndex = pendingAttachments.length;
+    
+    // Determine file type (questionnaire if contains "question" or specific format, otherwise reference)
+    const type: 'questionnaire' | 'reference' = 
+      file.name.toLowerCase().includes('question') || file.name.toLowerCase().includes('quest') 
+        ? 'questionnaire' 
+        : 'reference';
+    
+    setPendingAttachments(prev => [...prev, { file, status: 'uploading', type }]);
+
+    try {
+      const uploadFn = type === 'questionnaire' ? uploadQuestionnaire : uploadReferenceDocument;
+      const result = await uploadFn(file);
+      const docId = result.documentId || result.questionnaireId;
+
+      setPendingAttachments(prev =>
+        prev.map((att, i) => i === tempIndex ? { ...att, status: 'processing', documentId: docId } : att)
+      );
+
+      // Poll for processing completion
+      if (docId) {
+        const poll = setInterval(async () => {
+          try {
+            const statusResult = await getDocumentStatus(docId);
+            if (statusResult.status === "processed") {
+              clearInterval(poll);
+              setPendingAttachments(prev =>
+                prev.map((att, i) => i === tempIndex ? { ...att, status: 'ready' } : att)
+              );
+            } else if (statusResult.status === "failed" || statusResult.status === "error") {
+              clearInterval(poll);
+              setPendingAttachments(prev =>
+                prev.map((att, i) => i === tempIndex ? { ...att, status: 'error' } : att)
+              );
+            }
+          } catch {
+            clearInterval(poll);
+          }
+        }, 3000);
+      }
+    } catch {
+      setPendingAttachments(prev =>
+        prev.map((att, i) => i === tempIndex ? { ...att, status: 'error' } : att)
+      );
+    }
+  };
+
+  const removeAttachment = (index: number) => {
+    setPendingAttachments(prev => prev.filter((_, i) => i !== index));
   };
 
   return (
@@ -753,10 +823,70 @@ export default function ChatMain({ initialMessage, uploadedFiles, sessionId: ext
 
       {/* Input Area */}
       <div className="p-6 pb-8 bg-gradient-to-t from-black/40 to-transparent">
+        {/* Attached Files (ChatGPT-style) */}
+        {pendingAttachments.length > 0 && (
+          <AnimatePresence>
+            <div className="flex flex-wrap gap-2 max-w-5xl mx-auto mb-3">
+              {pendingAttachments.map((attachment, index) => (
+                <motion.div
+                  key={index}
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-xl backdrop-blur-md border ${
+                    attachment.status === 'error'
+                      ? 'bg-red-500/20 border-red-500/40'
+                      : attachment.status === 'ready'
+                      ? 'bg-emerald-500/20 border-emerald-500/40'
+                      : 'bg-amber-500/20 border-amber-500/40'
+                  }`}
+                >
+                  {attachment.status === 'uploading' || attachment.status === 'processing' ? (
+                    <Loader2 size={14} className="animate-spin text-amber-400" />
+                  ) : attachment.status === 'ready' ? (
+                    <Check size={14} className="text-emerald-400" />
+                  ) : (
+                    <FileText size={14} className="text-red-400" />
+                  )}
+                  <div className="flex flex-col">
+                    <span className="text-xs text-white font-medium max-w-[150px] truncate">
+                      {attachment.file.name}
+                    </span>
+                    <span className="text-[9px] text-gray-400 uppercase">
+                      {attachment.status === 'uploading' ? 'Uploading...' :
+                       attachment.status === 'processing' ? 'Processing...' :
+                       attachment.status === 'error' ? 'Failed' : 'Ready'}
+                    </span>
+                  </div>
+                  {(attachment.status === 'ready' || attachment.status === 'error') && (
+                    <button
+                      onClick={() => removeAttachment(index)}
+                      className="p-0.5 hover:bg-white/20 rounded-full transition-colors"
+                    >
+                      <X size={12} className="text-white" />
+                    </button>
+                  )}
+                </motion.div>
+              ))}
+            </div>
+          </AnimatePresence>
+        )}
+
         <div className="flex items-end gap-3 max-w-5xl mx-auto">
+          {/* Hidden File Input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.docx,.xlsx,.doc,.xls,.md,.txt"
+            className="hidden"
+            onChange={(e) => handleFileSelect(e.target.files)}
+          />
+
           {/* Action Buttons */}
           <div className="flex items-center gap-2 mb-2">
-            <button className="p-3 rounded-full hover:bg-emerald-500/20 text-emerald-500/70 hover:text-emerald-400 transition-colors border border-emerald-500/20 bg-[rgba(16,185,129,0.05)] backdrop-blur-md group">
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              className="p-3 rounded-full hover:bg-emerald-500/20 text-emerald-500/70 hover:text-emerald-400 transition-colors border border-emerald-500/20 bg-[rgba(16,185,129,0.05)] backdrop-blur-md group">
               <FileUp size={20} className="group-hover:scale-110 transition-transform" />
             </button>
             <button className="p-3 rounded-full hover:bg-emerald-500/20 text-emerald-500/70 hover:text-emerald-400 transition-colors border border-emerald-500/20 bg-[rgba(16,185,129,0.05)] backdrop-blur-md group">
@@ -793,9 +923,9 @@ export default function ChatMain({ initialMessage, uploadedFiles, sessionId: ext
           {/* Send Button */}
           <button
             onClick={handleSend}
-            disabled={!inputValue.trim()}
+            disabled={!inputValue.trim() && !pendingAttachments.some(a => a.status === 'ready')}
             className={`p-3 rounded-full mb-2 transition-all duration-300 ${
-              inputValue.trim() 
+              inputValue.trim() || pendingAttachments.some(a => a.status === 'ready')
                 ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 hover:bg-emerald-400 scale-100" 
                 : "bg-white/5 text-gray-500 border border-white/5 scale-95 opacity-50 cursor-not-allowed"
             }`}
