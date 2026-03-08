@@ -19,6 +19,21 @@ const QUESTIONNAIRE_INTENT_PATTERNS = [
   /generate\s+answers?/i,
 ];
 
+/** Simple patterns when a questionnaire is already attached */
+const SIMPLE_QUESTIONNAIRE_PATTERNS = [
+  /^answer$/i,
+  /^analyze$/i,
+  /^process$/i,
+  /^fill\s+(it|this|out)$/i,
+  /^complete$/i,
+  /^respond$/i,
+  /^go$/i,
+  /^start$/i,
+  /^answer\s+(this|that)$/i,
+  /^analyze\s+(this|that)$/i,
+  /^process\s+(this|that)$/i,
+];
+
 const log = createLogger('ChatService');
 
 interface ChatMessage {
@@ -176,8 +191,14 @@ export class ChatService {
 
   /**
    * Detect if the user message is asking to answer all questions from an uploaded questionnaire.
+   * If a questionnaireDocumentId is provided, accepts simpler patterns like just "answer" or "analyze".
    */
-  private isQuestionnaireIntent(message: string): boolean {
+  private isQuestionnaireIntent(message: string, questionnaireDocumentId?: string): boolean {
+    // If questionnaire is attached and user uses simple command, trigger questionnaire mode
+    if (questionnaireDocumentId && SIMPLE_QUESTIONNAIRE_PATTERNS.some(p => p.test(message.trim()))) {
+      return true;
+    }
+    // Otherwise check full patterns
     return QUESTIONNAIRE_INTENT_PATTERNS.some(p => p.test(message));
   }
 
@@ -343,7 +364,7 @@ export class ChatService {
     let questionText = message;
     let questionnaireId: string | undefined;
     let isStructured = false;
-    if (this.isQuestionnaireIntent(message)) {
+    if (this.isQuestionnaireIntent(message, questionnaireDocumentId)) {
       const result = await this.fetchQuestionnaireQuestions(userId, questionnaireDocumentId);
       if (result && result.questions.length > 0) {
         questionText = result.questions.map((q, i) => `${i + 1}. ${q}`).join('\n');
