@@ -164,7 +164,7 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
 
   // Download functionality
   const handleDownload = async (format: 'pdf' | 'docx') => {
-    // Generate formatted content
+    // Generate formatted content using current versions
     let content = `# Questionnaire Response\n\n`;
     content += `## Summary\n${data.summary}\n\n`;
     content += `---\n\n`;
@@ -175,20 +175,23 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
     content += `- Overall Confidence: ${(data.overallConfidence * 100).toFixed(1)}%\n\n`;
     content += `---\n\n`;
 
-    data.answers.forEach((answer) => {
-      const currentAnswer = getCurrentAnswer(answer.questionNumber) || answer;
-      content += `## ${currentAnswer.questionNumber}. ${currentAnswer.questionText}\n\n`;
-      content += `${currentAnswer.answerText}\n\n`;
-      content += `**Confidence:** ${(currentAnswer.confidence * 100).toFixed(1)}%\n\n`;
-      if (currentAnswer.citations.length > 0) {
-        content += `**References:**\n`;
-        currentAnswer.citations.forEach((cite, idx) => {
-          content += `${idx + 1}. ${cite.document}${cite.page ? ` (Page ${cite.page})` : ''}\n`;
-        });
-        content += `\n`;
-      }
-      content += `---\n\n`;
-    });
+    // Use versioned answers (current versions)
+    Array.from(versionedAnswers.entries())
+      .sort(([aNum], [bNum]) => aNum - bNum)
+      .forEach(([questionNumber, versioned]) => {
+        const currentAnswer = versioned.versions[versioned.currentVersionIndex];
+        content += `## ${currentAnswer.questionNumber}. ${currentAnswer.questionText}\n\n`;
+        content += `${currentAnswer.answerText}\n\n`;
+        content += `**Confidence:** ${(currentAnswer.confidence * 100).toFixed(1)}%\n\n`;
+        if (currentAnswer.citations.length > 0) {
+          content += `**References:**\n`;
+          currentAnswer.citations.forEach((cite, idx) => {
+            content += `${idx + 1}. ${cite.document}${cite.page ? ` (Page ${cite.page})` : ''}\n`;
+          });
+          content += `\n`;
+        }
+        content += `---\n\n`;
+      });
 
     if (format === 'docx') {
       // For Word format, we'd use a library like docx or html-docx-js
@@ -254,11 +257,10 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
       {/* Individual Q&A Cards */}
       <div className="space-y-4">
         <AnimatePresence>
-          {data.answers.map((originalAnswer, index) => {
-            const answer = getCurrentAnswer(originalAnswer.questionNumber) || originalAnswer;
-            const versioned = versionedAnswers.get(answer.questionNumber);
-            const isRegenerating = regenerating.has(answer.questionNumber);
-            const isEditing = editingQuestionNumber === answer.questionNumber;
+          {Array.from(versionedAnswers.entries()).map(([questionNumber, versioned], index) => {
+            const answer = versioned.versions[versioned.currentVersionIndex];
+            const isRegenerating = regenerating.has(questionNumber);
+            const isEditing = editingQuestionNumber === questionNumber;
 
             return (
               <motion.div
@@ -290,28 +292,28 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
                 </div>
 
                 {/* Answer (Editable) */}
-                <div
-                  className={`prose prose-sm max-w-none dark:prose-invert mb-4 ${
-                    isEditing ? 'bg-blue-50 dark:bg-blue-900/20 p-3 rounded' : ''
-                  }`}
-                  contentEditable={isEditing}
-                  suppressContentEditableWarning
-                  onBlur={handleEditBlur}
-                  onInput={(e) => {
-                    if (isEditing) {
+                {isEditing ? (
+                  <textarea
+                    value={editedContent[answer.questionNumber] || answer.answerText}
+                    onChange={(e) => {
                       setEditedContent((prev) => ({
                         ...prev,
-                        [answer.questionNumber]: e.currentTarget.textContent || '',
+                        [answer.questionNumber]: e.target.value,
                       }));
-                    }
-                  }}
-                >
-                  {isEditing ? (
-                    editedContent[answer.questionNumber] || answer.answerText
-                  ) : (
+                    }}
+                    onBlur={handleEditBlur}
+                    autoFocus
+                    className="w-full mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-300 dark:border-blue-700 rounded-lg text-gray-900 dark:text-gray-100 text-sm leading-relaxed resize-y min-h-[150px] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                ) : (
+                  <div
+                    onClick={() => handleEditStart(answer.questionNumber, answer.answerText)}
+                    className="prose prose-sm max-w-none dark:prose-invert mb-4 cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-900/10 p-3 rounded transition-colors"
+                    title="Click to edit"
+                  >
                     <ReactMarkdown>{answer.answerText}</ReactMarkdown>
-                  )}
-                </div>
+                  </div>
+                )}
 
                 {/* Confidence Bar */}
                 <div className="mb-4">
@@ -378,7 +380,7 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
                   </div>
 
                   {/* Version Toggle */}
-                  {versioned && versioned.versions.length > 1 && (
+                  {versioned.versions.length > 1 && (
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => handleVersionChange(answer.questionNumber, 'prev')}
