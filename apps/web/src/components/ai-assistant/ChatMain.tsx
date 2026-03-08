@@ -4,6 +4,7 @@ import { Send, Mic, FileUp, Copy, ThumbsUp, ThumbsDown, RotateCcw, MoreHorizonta
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { sendChatMessage, getChatSession, getQuestions, exportQuestionnaire, regenerateSingleQuestion, uploadQuestionnaire, uploadReferenceDocument, getDocumentStatus, StructuredAnswerItem, StructuredAnswersResponse } from "@/services/aiAssistantApi";
+import { QuestionnaireResult } from "./QuestionnaireResult";
 
 interface ChatMainProps {
   initialMessage: string;
@@ -510,6 +511,30 @@ export default function ChatMain({ initialMessage, uploadedFiles, sessionId: ext
                         <Loader2 size={16} className="animate-spin" />
                         <span className="text-sm">Thinking...</span>
                       </div>
+                    </div>
+                  ) : message.structuredAnswers && message.structuredAnswers.answers && message.structuredAnswers.answers.length > 0 ? (
+                    /* ── Use New QuestionnaireResult Component ── */
+                    <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-xl">
+                      <QuestionnaireResult 
+                        data={{
+                          summary: message.structuredAnswers.summary,
+                          totalQuestions: message.structuredAnswers.totalQuestions,
+                          answeredQuestions: message.structuredAnswers.answeredQuestions,
+                          overallConfidence: message.structuredAnswers.overallConfidence || 0,
+                          totalCitations: message.structuredAnswers.totalCitations || 0,
+                          answers: message.structuredAnswers.answers.map(a => ({
+                            questionNumber: a.questionNumber,
+                            questionText: a.questionText,
+                            answerText: a.answerText,
+                            citations: a.citations || a.sources || [],
+                            evidenceSnippet: a.evidenceSnippet || a.referenceExcerpt || '',
+                            confidence: a.confidence ?? 0,
+                            status: a.status || 'answered',
+                          })),
+                        }}
+                        sessionId={sessionId}
+                        questionnaireDocumentType="pdf"
+                      />
                     </div>
                   ) : message.questionCards && message.questionCards.length > 0 ? (
                     /* ── Structured Per-Question Cards ── */

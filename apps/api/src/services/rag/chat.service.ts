@@ -57,6 +57,8 @@ export interface StructuredResponse {
   totalQuestions: number;
   answeredQuestions: number;
   answers: StructuredAnswer[];
+  overallConfidence: number;
+  totalCitations: number;
 }
 
 /**
@@ -385,10 +387,25 @@ export class ChatService {
               confidence: typeof a.confidence === 'number' ? Math.min(Math.max(a.confidence, 0), 1) : 0,
               status: ['answered', 'not_found'].includes(a.status) ? a.status : 'answered',
             })),
+            overallConfidence: 0,
+            totalCitations: 0,
           };
           
           // Re-calculate answered count for accuracy
           structuredAnswers.answeredQuestions = structuredAnswers.answers.filter(a => a.status === 'answered').length;
+          
+          // Calculate overall confidence (average of all answered questions)
+          const answeredQuestions = structuredAnswers.answers.filter(a => a.status === 'answered');
+          if (answeredQuestions.length > 0) {
+            structuredAnswers.overallConfidence = answeredQuestions.reduce((sum, a) => sum + a.confidence, 0) / answeredQuestions.length;
+          }
+          
+          // Count total unique citations
+          const uniqueCitations = new Set<string>();
+          structuredAnswers.answers.forEach(a => {
+            a.citations.forEach(c => uniqueCitations.add(c.document));
+          });
+          structuredAnswers.totalCitations = uniqueCitations.size;
 
           // Relevance check: force not_found if answer doesn't reference chunks (implementation detail: check citations/snippets if available)
           // However, for now we trust the LLM's own status determination unless it's obviously empty.

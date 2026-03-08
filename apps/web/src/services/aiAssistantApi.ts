@@ -201,6 +201,8 @@ export interface StructuredAnswersResponse {
   summary: string;
   totalQuestions: number;
   answeredQuestions: number;
+  overallConfidence: number;
+  totalCitations: number;
   answers: StructuredAnswerItem[];
 }
 
