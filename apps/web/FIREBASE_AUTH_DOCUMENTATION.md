@@ -31,8 +31,10 @@ apps/web/src/
 │   └── (auth)/
 │       ├── login/
 │       │   └── page.tsx      # Login page with Firebase
-│       └── signup/
-│           └── page.tsx      # Signup page with Firebase
+│       ├── signup/
+│       │   └── page.tsx      # Signup page with Firebase
+│       └── forgot-password/
+│           └── page.tsx      # Password reset page
 └── components/
     ├── layout/
     │   └── Sidebar.tsx       # Updated with Firebase logout
@@ -82,6 +84,7 @@ export const googleProvider = new GoogleAuthProvider();
 | `signUpWithEmail(email, password)` | Create new Firebase account | `User` object |
 | `signInWithEmail(email, password)` | Sign in with credentials | `User` object |
 | `signInWithGoogle()` | Sign in with Google popup | `User` object |
+| `sendPasswordReset(email)` | Send password reset email | `void` |
 | `logout()` | Sign out current user | `void` |
 
 **Error Handling**: All functions convert Firebase error codes to user-friendly messages.
@@ -241,6 +244,51 @@ const handleLogout = async () => {
   }
 };
 ```
+
+---
+
+### **Forgot Password Flow**
+
+1. User clicks "Forgot password?" on login page
+2. Navigates to `/forgot-password`
+3. Enters email address
+4. Clicks "Send Reset Link"
+5. Firebase sends password reset email
+6. Success message displayed
+7. User checks email and clicks reset link
+8. Firebase-hosted page opens for password reset
+9. User enters new password
+10. Redirects back to login
+
+**Code Example** (Forgot Password):
+```typescript
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  
+  try {
+    // Send password reset email via Firebase
+    await sendPasswordReset(email);
+    setSuccess(true);  // Show success message
+  } catch (error) {
+    setError(error.message);
+  }
+};
+```
+
+**Features**:
+- ✅ Email validation
+- ✅ Loading states
+- ✅ Success screen with instructions
+- ✅ Error handling
+- ✅ Link to return to login
+- ✅ Option to resend reset email
+
+**Firebase Behavior**:
+- Automatically sends email with reset link
+- Link expires after 1 hour
+- Firebase handles the password reset page
+- No additional configuration needed
+- Email template customizable in Firebase Console
 
 ---
 
@@ -433,11 +481,13 @@ function ProtectedRoute({ children }) {
 
 - ✅ Firebase SDK installed
 - ✅ Firebase app initialized
-- ✅ Auth functions created (signup, login, Google, logout)
+- ✅ Auth functions created (signup, login, Google, logout, password reset)
 - ✅ AuthContext for state management
 - ✅ AuthProvider wrapped in root layout
 - ✅ Signup page updated with Firebase
 - ✅ Login page updated with Firebase
+- ✅ Forgot password page created
+- ✅ Password reset email functionality
 - ✅ Logout functionality in Sidebar
 - ✅ Error handling implemented
 - ✅ 6-portal system integrated
@@ -453,12 +503,13 @@ function ProtectedRoute({ children }) {
 1. ✅ **Email/Password Signup**: Create account with Firebase
 2. ✅ **Email/Password Login**: Authenticate with Firebase
 3. ✅ **Google OAuth**: Sign in with Google popup
-4. ✅ **Logout**: Firebase + local state cleared
-5. ✅ **6 Portals**: Retail/Hospital modes with 3 roles each
-6. ✅ **Demo Mode**: One-click testing without backend
-7. ✅ **Role-Based Redirects**: Correct portal based on role + mode
-8. ✅ **Persistent Sessions**: Auth state survives page refresh
-9. ✅ **Error Messages**: User-friendly Firebase error handling
+4. ✅ **Forgot Password**: Password reset via email
+5. ✅ **Logout**: Firebase + local state cleared
+6. ✅ **6 Portals**: Retail/Hospital modes with 3 roles each
+7. ✅ **Demo Mode**: One-click testing without backend
+8. ✅ **Role-Based Redirects**: Correct portal based on role + mode
+9. ✅ **Persistent Sessions**: Auth state survives page refresh
+10. ✅ **Error Messages**: User-friendly Firebase error handling
 
 ---
 

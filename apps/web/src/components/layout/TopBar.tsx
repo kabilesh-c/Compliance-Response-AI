@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Search, Bell, Grid3x3, X, Package, ShoppingCart, FileText, Clock } from "lucide-react";
+import { Search, Bell, Grid3x3, X, Package, ShoppingCart, FileText, Clock, Sparkles } from "lucide-react";
 import { useRouter, usePathname } from "next/navigation";
 import { medicines, orders } from "@/lib/mockData";
 import { useAuthStore } from "@/stores/authStore";
@@ -201,6 +201,16 @@ export default function TopBar() {
 
       {/* Actions */}
       <div className="flex items-center gap-3">
+        {/* Compliance AI Button */}
+        <button
+          onClick={() => router.push("/ai-assistant")}
+          className="px-4 py-2 bg-primary-yellow/20 hover:bg-primary-yellow/30 text-primary-yellow-dark font-semibold rounded-full transition-all flex items-center gap-2 border border-primary-yellow/30"
+          title="Open Compliance AI"
+        >
+          <Sparkles size={16} />
+          <span className="hidden lg:inline text-sm">Compliance AI</span>
+        </button>
+
         {/* Notifications */}
         <div className="relative">
           <button 

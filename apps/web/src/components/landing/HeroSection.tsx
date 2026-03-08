@@ -2,7 +2,7 @@
 
 import { motion, useScroll, useTransform } from "framer-motion";
 import Link from "next/link";
-import { ArrowRight, PlayCircle } from "lucide-react";
+import { ArrowRight, Sparkles } from "lucide-react";
 import DashboardMockup from "./DashboardMockup";
 
 export default function HeroSection() {
@@ -72,10 +72,13 @@ export default function HeroSection() {
                 Get Started
                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
               </Link>
-              <button className="px-8 py-4 bg-transparent border-2 border-white text-white font-bold rounded-full hover:bg-white/10 transition-all duration-300 flex items-center justify-center gap-2">
-                <PlayCircle className="w-5 h-5" />
-                Watch Demo
-              </button>
+              <Link
+                href="/login"
+                className="px-8 py-4 bg-transparent border-2 border-white text-black font-bold rounded-full hover:bg-white/10 transition-all duration-300 flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-5 h-5 text-black" />
+                Try Compliance Response AI
+              </Link>
             </div>
           </motion.div>
 

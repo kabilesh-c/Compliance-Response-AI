@@ -6,6 +6,7 @@ import { Home, ShoppingCart, Package, BarChart3, Settings, Zap, Building2, Users
 import Sidebar, { NavItem } from "@/components/layout/Sidebar";
 import TopBar from "@/components/layout/TopBar";
 import { useAuthStore, UserRole } from "@/stores/authStore";
+import DashboardAIModal from "@/components/DashboardAIModal";
 
 // Define page access by role
 const PAGE_ACCESS: Record<string, UserRole[]> = {
@@ -165,6 +166,7 @@ export default function DashboardLayout({
           {children}
         </main>
       </div>
+      <DashboardAIModal />
     </div>
   );
 }

@@ -82,6 +82,7 @@ module.exports = {
       animation: {
         marquee: 'marquee 40s linear infinite',
         'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'spin-slow': 'spin 8s linear infinite',
       },
       keyframes: {
         marquee: {
@@ -91,5 +92,5 @@ module.exports = {
       },
     },
   },
-  plugins: [],
+  plugins: [require('@tailwindcss/typography')],
 }

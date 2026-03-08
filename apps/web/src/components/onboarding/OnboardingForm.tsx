@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/stores/authStore";
 import { authApi } from "@/lib/api";
+import { signUpWithEmail, saveUserProfile } from "@/lib/auth";
 
 type Step = "mode" | "org" | "admin" | "invite";
 type Mode = "retail" | "hospital" | null;
@@ -49,22 +50,57 @@ export default function OnboardingForm() {
     setIsLoading(true);
     setError("");
 
-    // Demo mode: Skip API call and directly proceed to success step
-    // This simulates a successful registration without requiring backend
-    const mockUser = {
-      id: "demo-" + Date.now(),
-      name: formData.adminName,
-      email: formData.email,
-      role: "ADMIN",
-      orgName: formData.orgName,
-      mode: mode === "hospital" ? "HOSPITAL" : "RETAIL"
-    };
-    const mockToken = "demo-token-" + Date.now();
+    try {
+      // Step 1: Create Firebase account
+      const firebaseUser = await signUpWithEmail(formData.email, formData.password);
+      
+      // Step 2: Get Firebase ID token
+      const token = await firebaseUser.getIdToken();
 
-    setCreatedUser(mockUser);
-    setCreatedToken(mockToken);
-    setIsLoading(false);
-    setStep("invite");
+      // Step 3: Save user profile to Supabase PostgreSQL
+      await saveUserProfile({
+        firebase_uid: firebaseUser.uid,
+        email: formData.email,
+        name: formData.adminName,
+        role: "ADMIN",
+        mode: mode === "hospital" ? "HOSPITAL" : "RETAIL",
+        organization_name: formData.orgName,
+        organization_id: undefined
+      });
+
+      // Step 4: Create user data for state
+      const userData = {
+        id: firebaseUser.uid,
+        name: formData.adminName,
+        email: formData.email,
+        role: "ADMIN" as const,
+        organizationId: undefined
+      };
+
+      // Step 5: Try to register with backend (optional)
+      try {
+        await authApi.register({
+          name: formData.adminName,
+          email: formData.email,
+          password: formData.password,
+          role: "ADMIN",
+          orgCode: undefined,
+          mode: mode === "hospital" ? "HOSPITAL" : "RETAIL"
+        });
+      } catch (apiError) {
+        // If backend fails, continue anyway
+        console.warn("Backend registration failed:", apiError);
+      }
+
+      // Step 6: Save created user and token for later login
+      setCreatedUser(userData);
+      setCreatedToken(token);
+      setIsLoading(false);
+      setStep("invite");
+    } catch (err: any) {
+      setError(err.message || "Failed to create account");
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -252,6 +288,12 @@ export default function OnboardingForm() {
               </div>
 
               <form onSubmit={handleAdminSubmit} className="space-y-4">
+                {error && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">
+                    {error}
+                  </div>
+                )}
+                
                 <div>
                   <label className="block text-sm font-medium text-neutral-700 mb-1">
                     Full Name
@@ -314,10 +356,20 @@ export default function OnboardingForm() {
 
                 <button
                   type="submit"
-                  className="w-full py-4 bg-primary-yellow text-neutral-900 font-bold rounded-xl hover:bg-primary-yellow-dark transition-colors flex items-center justify-center gap-2 mt-6"
+                  disabled={isLoading}
+                  className="w-full py-4 bg-primary-yellow text-neutral-900 font-bold rounded-xl hover:bg-primary-yellow-dark transition-colors flex items-center justify-center gap-2 mt-6 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Create Account
-                  <ArrowRight size={20} />
+                  {isLoading ? (
+                    <>
+                      <span className="w-5 h-5 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin" />
+                      Creating Account...
+                    </>
+                  ) : (
+                    <>
+                      Create Account
+                      <ArrowRight size={20} />
+                    </>
+                  )}
                 </button>
               </form>
             </motion.div>
@@ -356,17 +408,17 @@ export default function OnboardingForm() {
               <div className="flex flex-col gap-4">
                 <button
                   onClick={() => {
-                    login({
-                      id: "1",
-                      name: formData.adminName,
-                      email: formData.email,
-                      role: "ADMIN"
-                    }, "mock-token");
-                    setStoreMode(mode === "hospital" ? "HOSPITAL" : "RETAIL");
-                    if (mode === "hospital") {
-                      router.push("/hospital/admin");
-                    } else {
-                      router.push("/dashboard");
+                    // Login with the Firebase account we created
+                    if (createdUser && createdToken) {
+                      login(createdUser, createdToken);
+                      setStoreMode(mode === "hospital" ? "HOSPITAL" : "RETAIL");
+                      
+                      // Redirect to appropriate dashboard
+                      if (mode === "hospital") {
+                        router.push("/hospital/admin");
+                      } else {
+                        router.push("/admin/dashboard");
+                      }
                     }
                   }}
                   className="w-full py-4 bg-primary-yellow text-neutral-900 font-bold rounded-xl hover:bg-primary-yellow-dark transition-colors"

@@ -3,6 +3,7 @@
 import PharmacistSidebar from "@/components/portals/pharmacist/PharmacistSidebar";
 import PharmacistTopBar from "@/components/portals/pharmacist/PharmacistTopBar";
 import RoleGuard from "@/components/auth/RoleGuard";
+import DashboardAIModal from "@/components/DashboardAIModal";
 
 export default function PharmacistLayout({
   children,
@@ -17,6 +18,7 @@ export default function PharmacistLayout({
         <main className="flex-1 ml-24 pt-16 h-screen overflow-y-auto p-6">
           {children}
         </main>
+        <DashboardAIModal />
       </div>
     </RoleGuard>
   );

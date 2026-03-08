@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Building2, Store, ArrowRight, UserPlus } from "lucide-react";
 import { authApi } from "@/lib/api";
 import { useAuthStore } from "@/stores/authStore";
-import { signUpWithEmail, signInWithGoogle } from "@/lib/auth";
+import { signUpWithEmail, signInWithGoogle, saveUserProfile } from "@/lib/auth";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -20,6 +20,7 @@ export default function SignupPage() {
     role: "PHARMACIST",
     mode: "RETAIL" as "RETAIL" | "HOSPITAL",
   });
+  const [modeSelected, setModeSelected] = useState(false); // Track if user explicitly selected mode
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -35,9 +36,28 @@ export default function SignupPage() {
       // Step 2: Get Firebase ID token
       const token = await firebaseUser.getIdToken();
 
-      // Step 3: Register with backend API (optional - creates user record with additional data)
+      // Step 3: Save user profile to Supabase PostgreSQL
+      await saveUserProfile({
+        firebase_uid: firebaseUser.uid,
+        email: formData.email,
+        name: formData.name,
+        role: formData.role as any,
+        mode: formData.mode,
+        organization_id: formData.orgCode || undefined
+      });
+
+      // Step 4: Create user data for login
+      const userData = {
+        id: firebaseUser.uid,
+        email: firebaseUser.email || "",
+        name: formData.name || firebaseUser.email?.split("@")[0] || "User",
+        role: formData.role as any,
+        organizationId: formData.orgCode || undefined
+      };
+
+      // Step 5: Try to register with backend API (optional)
       try {
-        const { user: apiUser } = await authApi.register({
+        await authApi.register({
           name: formData.name,
           email: formData.email,
           password: formData.password,
@@ -45,23 +65,15 @@ export default function SignupPage() {
           orgCode: formData.orgCode,
           mode: formData.mode
         });
-
-        // Use API user data if available
-        login(apiUser, token);
       } catch (apiError) {
-        // If backend fails, still login with Firebase user
-        console.warn("Backend registration failed, using Firebase user:", apiError);
-        const userData = {
-          id: firebaseUser.uid,
-          email: firebaseUser.email || "",
-          name: formData.name || firebaseUser.email?.split("@")[0] || "User",
-          role: formData.role as any,
-          organizationId: formData.orgCode || undefined
-        };
-        login(userData, token);
+        // If backend fails, continue anyway
+        console.warn("Backend registration failed:", apiError);
       }
 
-      // Step 4: Set mode
+      // Step 6: Login
+      login(userData, token);
+
+      // Step 7: Set mode
       setMode(formData.mode);
 
       // Step 5: Redirect based on role and mode
@@ -109,12 +121,23 @@ export default function SignupPage() {
 
     try {
       // Step 1: Sign in with Google
-      const firebaseUser = await signInWithGoogle();
+      const userCredential = await signInWithGoogle();
+      const firebaseUser = userCredential.user;
       
       // Step 2: Get Firebase ID token
       const token = await firebaseUser.getIdToken();
 
-      // Step 3: Create user data
+      // Step 3: Save user profile to Supabase PostgreSQL
+      await saveUserProfile({
+        firebase_uid: firebaseUser.uid,
+        email: firebaseUser.email || "",
+        name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
+        role: formData.role as any,
+        mode: formData.mode,
+        organization_id: formData.orgCode || undefined
+      });
+
+      // Step 4: Create user data
       const userData = {
         id: firebaseUser.uid,
         email: firebaseUser.email || "",
@@ -123,7 +146,7 @@ export default function SignupPage() {
         organizationId: formData.orgCode || undefined
       };
 
-      // Step 4: Login and set mode
+      // Step 5: Login and set mode
       login(userData, token);
       setMode(formData.mode);
 
@@ -282,7 +305,10 @@ export default function SignupPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    onClick={() => setFormData({ ...formData, mode: "RETAIL" })}
+                    onClick={() => {
+                      setFormData({ ...formData, mode: "RETAIL" });
+                      setModeSelected(true);
+                    }}
                     className={`py-3 px-4 rounded-xl border-2 font-medium transition-all ${
                       formData.mode === "RETAIL"
                         ? "border-primary-yellow bg-primary-yellow/10 text-neutral-900"
@@ -293,7 +319,10 @@ export default function SignupPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFormData({ ...formData, mode: "HOSPITAL" })}
+                    onClick={() => {
+                      setFormData({ ...formData, mode: "HOSPITAL" });
+                      setModeSelected(true);
+                    }}
                     className={`py-3 px-4 rounded-xl border-2 font-medium transition-all ${
                       formData.mode === "HOSPITAL"
                         ? "border-primary-yellow bg-primary-yellow/10 text-neutral-900"
@@ -401,8 +430,9 @@ export default function SignupPage() {
               <button
                 type="button"
                 onClick={handleGoogleSignIn}
-                disabled={isLoading}
+                disabled={isLoading || !modeSelected}
                 className="w-full py-3.5 bg-white border-2 border-neutral-200 text-neutral-900 font-semibold rounded-xl hover:bg-neutral-50 hover:border-primary-yellow transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
+                title={!modeSelected ? "Please select your operating mode first" : "Sign up with Google"}
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
                   <path
@@ -424,6 +454,12 @@ export default function SignupPage() {
                 </svg>
                 Continue with Google
               </button>
+              
+              {!modeSelected && (
+                <p className="text-xs text-neutral-500 text-center -mt-3">
+                  Select your operating mode above to enable Google sign-in
+                </p>
+              )}
             </form>
           </div>
         )}

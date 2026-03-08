@@ -3,6 +3,7 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   compress: true,
+  transpilePackages: ['react-markdown', 'remark-gfm'],
   compiler: {
     removeConsole: process.env.NODE_ENV === 'production',
   }

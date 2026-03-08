@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/authStore";
 import { authApi } from "@/lib/api";
-import { signInWithEmail, signInWithGoogle } from "@/lib/auth";
+import { signInWithEmail, signInWithGoogle, getUserProfile } from "@/lib/auth";
 import { Check, Info, ArrowRight, Building2, ArrowLeft } from "lucide-react";
 
 export default function LoginPage() {
@@ -59,25 +59,25 @@ export default function LoginPage() {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // Redirect logic based on mode and role
-      let targetPath = "/dashboard";
+      let targetDashboard = "/dashboard";
       
       if (demoUser.mode === "HOSPITAL") {
         switch (demoUser.role) {
-          case "ADMIN": targetPath = "/hospital/admin"; break;
-          case "MANAGER": targetPath = "/manager"; break;
-          default: targetPath = "/hospital/staff"; break;
+          case "ADMIN": targetDashboard = "/hospital/admin"; break;
+          case "MANAGER": targetDashboard = "/manager"; break;
+          default: targetDashboard = "/hospital/staff"; break;
         }
       } else {
         switch (demoUser.role) {
-          case "ADMIN": targetPath = "/admin"; break;
-          case "MANAGER": targetPath = "/manager"; break;
-          case "PHARMACIST": targetPath = "/pos"; break;
-          default: targetPath = "/dashboard"; break;
+          case "ADMIN": targetDashboard = "/admin"; break;
+          case "MANAGER": targetDashboard = "/manager"; break;
+          case "PHARMACIST": targetDashboard = "/pos"; break;
+          default: targetDashboard = "/dashboard"; break;
         }
       }
       
       setIsLoading(false);
-      router.push(targetPath);
+      router.push(targetDashboard);
       return;
     }
     // ---------------------------------
@@ -89,36 +89,56 @@ export default function LoginPage() {
       // Step 2: Get Firebase ID token
       const token = await firebaseUser.getIdToken();
 
-      // Step 3: Try to get user data from backend API (optional)
+      // Step 3: Try to get user profile from Supabase
       let userData;
       let userMode: "RETAIL" | "HOSPITAL" = "RETAIL";
       
       try {
-        const response = await authApi.login(email, password);
-        const { user: apiUser } = response;
-
-        // Determine mode from organization type
-        if (apiUser.organization?.type === "HOSPITAL" || email.includes("hospital")) {
-          userMode = "HOSPITAL";
+        const userProfile = await getUserProfile(firebaseUser.uid);
+        
+        if (userProfile) {
+          // Use Supabase profile data
+          userData = {
+            id: userProfile.firebase_uid,
+            email: userProfile.email,
+            name: userProfile.name,
+            role: userProfile.role,
+            organizationId: userProfile.organization_id || undefined
+          };
+          userMode = userProfile.mode;
+        } else {
+          throw new Error("No Supabase profile found");
         }
+      } catch (supabaseError) {
+        // Fallback: Try backend API
+        console.warn("Supabase lookup failed, trying backend:", supabaseError);
+        try {
+          const response = await authApi.login(email, password);
+          const { user: apiUser } = response;
 
-        userData = {
-          id: apiUser.id,
-          name: `${apiUser.firstName} ${apiUser.lastName}`,
-          email: apiUser.email,
-          role: apiUser.role,
-          organizationId: apiUser.organizationId
-        };
-      } catch (apiError) {
-        // If backend fails, use Firebase user data
-        console.warn("Backend login failed, using Firebase user:", apiError);
-        userData = {
-          id: firebaseUser.uid,
-          email: firebaseUser.email || "",
-          name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
-          role: "PHARMACIST" as const, // Default role
-          organizationId: undefined
-        };
+          // Determine mode from organization type
+          if (apiUser.organization?.type === "HOSPITAL" || email.includes("hospital")) {
+            userMode = "HOSPITAL";
+          }
+
+          userData = {
+            id: apiUser.id,
+            name: `${apiUser.firstName} ${apiUser.lastName}`,
+            email: apiUser.email,
+            role: apiUser.role,
+            organizationId: apiUser.organizationId
+          };
+        } catch (apiError) {
+          // If both Supabase and backend fail, use default
+          console.warn("No profile found anywhere, using defaults:", apiError);
+          userData = {
+            id: firebaseUser.uid,
+            email: firebaseUser.email || "",
+            name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
+            role: "PHARMACIST" as const,
+            organizationId: undefined
+          };
+        }
       }
 
       // Step 4: Login with auth store
@@ -127,41 +147,45 @@ export default function LoginPage() {
 
       // Step 5: Redirect based on role and mode
       const role = userData.role;
+      let dashboardPath = "/dashboard";
+      
       if (userMode === "HOSPITAL") {
         switch (role) {
           case "ADMIN":
           case "SUPER_ADMIN":
-            router.push("/admin");
+            dashboardPath = "/admin";
             break;
           case "INVENTORY_MANAGER":
           case "MANAGER":
-            router.push("/manager");
+            dashboardPath = "/manager";
             break;
           case "PHARMACIST":
           case "SALES_CLERK":
-            router.push("/hospital/staff");
+            dashboardPath = "/hospital/staff";
             break;
           default:
-            router.push("/hospital/staff");
+            dashboardPath = "/hospital/staff";
         }
       } else {
         switch (role) {
           case "ADMIN":
           case "SUPER_ADMIN":
-            router.push("/admin");
+            dashboardPath = "/admin";
             break;
           case "INVENTORY_MANAGER":
           case "MANAGER":
-            router.push("/manager");
+            dashboardPath = "/manager";
             break;
           case "PHARMACIST":
           case "SALES_CLERK":
-            router.push("/pharmacist/dashboard");
+            dashboardPath = "/pharmacist/dashboard";
             break;
           default:
-            router.push("/dashboard");
+            dashboardPath = "/dashboard";
         }
       }
+      
+      router.push(dashboardPath);
     } catch (err: any) {
       setError(err.message || "Login failed. Please use one of the demo credentials below.");
     } finally {
@@ -197,24 +221,25 @@ export default function LoginPage() {
     await new Promise(resolve => setTimeout(resolve, 150));
 
     // Redirect based on mode and role
-    let targetPath = "/dashboard";
+    let dashboardPath = "/dashboard";
     
     if (mode === "HOSPITAL") {
       switch (role) {
-        case "ADMIN": targetPath = "/hospital/admin"; break;
-        case "MANAGER": targetPath = "/manager"; break;
-        default: targetPath = "/hospital/staff"; break;
+        case "ADMIN": dashboardPath = "/hospital/admin"; break;
+        case "MANAGER": dashboardPath = "/manager"; break;
+        default: dashboardPath = "/hospital/staff"; break;
       }
     } else {
       switch (role) {
-        case "ADMIN": targetPath = "/admin"; break;
-        case "MANAGER": targetPath = "/manager"; break;
-        case "PHARMACIST": targetPath = "/pos"; break;
-        default: targetPath = "/dashboard"; break;
+        case "ADMIN": dashboardPath = "/admin"; break;
+        case "MANAGER": dashboardPath = "/manager"; break;
+        case "PHARMACIST": dashboardPath = "/pos"; break;
+        default: dashboardPath = "/dashboard"; break;
       }
     }
     
-    router.push(targetPath);
+    setIsLoading(false);
+    router.push(dashboardPath);
   };
 
   const handleGoogleSignIn = async () => {
@@ -223,26 +248,85 @@ export default function LoginPage() {
 
     try {
       // Step 1: Sign in with Google
-      const firebaseUser = await signInWithGoogle();
+      const userCredential = await signInWithGoogle();
+      const firebaseUser = userCredential.user;
       
-      // Step 2: Get Firebase ID token
+      // Step 2: Check if this is a brand new account (created in last 5 seconds)
+      // If the account was just created, it means user clicked "Continue with Google" 
+      // without signing up first
+      const creationTime = new Date(firebaseUser.metadata.creationTime!).getTime();
+      const currentTime = Date.now();
+      const accountAgeSeconds = (currentTime - creationTime) / 1000;
+      
+      if (accountAgeSeconds < 5) {
+        // Brand new account - user needs to sign up first
+        // Delete the newly created Firebase account
+        await firebaseUser.delete();
+        setError("No account found. Please sign up first.");
+        setIsLoading(false);
+        return;
+      }
+      
+      // Step 3: Existing user - get Firebase ID token
       const token = await firebaseUser.getIdToken();
 
-      // Step 3: Create user data (default to RETAIL / PHARMACIST)
+      // Step 4: Try to get user profile from Supabase
+      let userProfile;
+      try {
+        userProfile = await getUserProfile(firebaseUser.uid);
+      } catch (supabaseError) {
+        console.warn("Supabase lookup failed:", supabaseError);
+      }
+      
+      if (!userProfile) {
+        setError("No profile found. Please sign up first.");
+        setIsLoading(false);
+        return;
+      }
+
+      // Step 5: Create user data from profile
       const userData = {
-        id: firebaseUser.uid,
-        email: firebaseUser.email || "",
-        name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
-        role: "PHARMACIST" as const, // Default role for Google sign-in
-        organizationId: undefined
+        id: userProfile.firebase_uid,
+        email: userProfile.email,
+        name: userProfile.name,
+        role: userProfile.role,
+        organizationId: userProfile.organization_id || undefined
       };
 
-      // Step 4: Login and set mode
+      // Step 6: Login and set mode
       login(userData, token);
-      setMode("RETAIL"); // Default to RETAIL mode
+      setMode(userProfile.mode);
 
-      // Step 5: Redirect to default dashboard
-      router.push("/pos"); // Default to POS for pharmacist
+      // Step 7: Redirect to dashboard
+      const role = userProfile.role;
+      const userMode = userProfile.mode;
+      let dashboardPath = "/dashboard";
+      
+      if (userMode === "HOSPITAL") {
+        switch (role) {
+          case "ADMIN":
+            dashboardPath = "/hospital/admin";
+            break;
+          case "MANAGER":
+            dashboardPath = "/manager";
+            break;
+          default:
+            dashboardPath = "/hospital/staff";
+        }
+      } else {
+        switch (role) {
+          case "ADMIN":
+            dashboardPath = "/admin/dashboard";
+            break;
+          case "MANAGER":
+            dashboardPath = "/manager";
+            break;
+          default:
+            dashboardPath = "/pos";
+        }
+      }
+      
+      router.push(dashboardPath);
     } catch (err: any) {
       setError(err.message || "Google sign-in failed");
     } finally {
@@ -270,23 +354,97 @@ export default function LoginPage() {
             <h1 className="text-4xl font-bold mb-4 leading-tight">
               Intelligent Pharmacy Management System
             </h1>
-            <p className="text-gray-400 text-lg mb-12">
+            <p className="text-gray-400 text-lg mb-8">
               Streamline your pharmacy operations with AI-powered insights and real-time analytics.
             </p>
 
-            <div className="space-y-4">
-              {[
-                "Real-time inventory tracking",
-                "AI-powered demand forecasting",
-                "Expiry prediction & alerts"
-              ].map((feature, i) => (
-                <div key={i} className="flex items-center gap-3">
-                  <div className="w-6 h-6 rounded bg-white/10 flex items-center justify-center text-primary-success">
-                    <Check size={14} className="text-primary-yellow" />
-                  </div>
-                  <span className="text-gray-300">{feature}</span>
+            {/* AI Feature Banner */}
+            <div className="mb-6 p-4 bg-[#1A1F37]/80 border border-primary-yellow/40 rounded-xl backdrop-blur">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 bg-primary-yellow rounded-lg flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-[#1A1F37]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
                 </div>
-              ))}
+                <div>
+                  <p className="text-sm text-white font-medium leading-relaxed">
+                    Try <span className="font-bold text-primary-yellow">Compliance Response AI</span> to automatically answer vendor and compliance questionnaires using internal documentation.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* One-Click Demo Access */}
+            <div className="bg-gradient-to-br from-gray-900/50 to-gray-800/30 rounded-2xl p-6 border-2 border-primary-yellow/40 shadow-2xl backdrop-blur">
+              <div className="flex items-center justify-center gap-2 mb-5">
+                <div className="h-px flex-1 bg-gradient-to-r from-transparent to-primary-yellow/60"></div>
+                <span className="text-xs font-bold text-primary-yellow uppercase tracking-widest">Quick Demo Access</span>
+                <div className="h-px flex-1 bg-gradient-to-l from-transparent to-primary-yellow/60"></div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                {/* Retail Pharmacy */}
+                <div className="bg-blue-500/10 backdrop-blur rounded-xl p-4 border border-blue-400/30">
+                  <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-primary-yellow rounded-full animate-pulse"></span>
+                    Retail Pharmacy
+                  </h4>
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => handleQuickLogin("admin@pharmacy.com", "ADMIN", "RETAIL")}
+                      className="w-full py-2.5 px-4 bg-primary-yellow text-black rounded-lg text-xs font-bold hover:bg-yellow-400 hover:scale-[1.02] transition-all shadow-lg shadow-primary-yellow/30"
+                    >
+                      Admin Portal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleQuickLogin("manager@pharmacy.com", "MANAGER", "RETAIL")}
+                      className="w-full py-2.5 px-4 bg-white/10 text-white border border-white/30 rounded-lg text-xs font-semibold hover:bg-primary-yellow hover:text-black hover:border-primary-yellow transition-all"
+                    >
+                      Manager Portal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleQuickLogin("pharmacist@pharmacy.com", "PHARMACIST", "RETAIL")}
+                      className="w-full py-2.5 px-4 bg-white/10 text-white border border-white/30 rounded-lg text-xs font-semibold hover:bg-primary-yellow hover:text-black hover:border-primary-yellow transition-all"
+                    >
+                      Pharmacist POS
+                    </button>
+                  </div>
+                </div>
+
+                {/* Hospital */}
+                <div className="bg-blue-500/10 backdrop-blur rounded-xl p-4 border border-blue-400/30">
+                  <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-primary-yellow rounded-full animate-pulse"></span>
+                    Hospital
+                  </h4>
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => handleQuickLogin("admin@hospital.com", "ADMIN", "HOSPITAL")}
+                      className="w-full py-2.5 px-4 bg-primary-yellow text-black rounded-lg text-xs font-bold hover:bg-yellow-400 hover:scale-[1.02] transition-all shadow-lg shadow-primary-yellow/30"
+                    >
+                      Admin Portal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleQuickLogin("manager@hospital.com", "MANAGER", "HOSPITAL")}
+                      className="w-full py-2.5 px-4 bg-white/10 text-white border border-white/30 rounded-lg text-xs font-semibold hover:bg-primary-yellow hover:text-black hover:border-primary-yellow transition-all"
+                    >
+                      Manager Portal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleQuickLogin("staff@hospital.com", "PHARMACIST", "HOSPITAL")}
+                      className="w-full py-2.5 px-4 bg-white/10 text-white border border-white/30 rounded-lg text-xs font-semibold hover:bg-primary-yellow hover:text-black hover:border-primary-yellow transition-all"
+                    >
+                      Staff Portal
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -411,79 +569,6 @@ export default function LoginPage() {
               </Link>
             </div>
           </form>
-
-          {/* One-Click Demo Login */}
-          <div className="mt-6 p-5 bg-gradient-to-br from-[#1A1F37] to-[#2D3555] rounded-2xl shadow-xl">
-            <div className="flex items-center justify-center gap-2 mb-4">
-              <div className="h-px flex-1 bg-gradient-to-r from-transparent to-primary-yellow/40"></div>
-              <span className="text-xs font-bold text-primary-yellow uppercase tracking-widest">Quick Demo Access</span>
-              <div className="h-px flex-1 bg-gradient-to-l from-transparent to-primary-yellow/40"></div>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              {/* Retail Pharmacy */}
-              <div className="bg-white/5 backdrop-blur rounded-xl p-3 border border-white/10">
-                <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                  <span className="w-2 h-2 bg-primary-yellow rounded-full"></span>
-                  Retail Pharmacy
-                </h4>
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => handleQuickLogin("admin@pharmacy.com", "ADMIN", "RETAIL")}
-                    className="w-full py-2.5 px-4 bg-primary-yellow text-[#1A1F37] rounded-lg text-xs font-bold hover:bg-primary-yellow-dark hover:scale-[1.02] transition-all shadow-lg shadow-primary-yellow/20"
-                  >
-                    Admin Portal
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickLogin("manager@pharmacy.com", "MANAGER", "RETAIL")}
-                    className="w-full py-2.5 px-4 bg-white/10 text-white border border-white/20 rounded-lg text-xs font-semibold hover:bg-primary-yellow hover:text-[#1A1F37] hover:border-primary-yellow transition-all"
-                  >
-                    Manager Portal
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickLogin("pharmacist@pharmacy.com", "PHARMACIST", "RETAIL")}
-                    className="w-full py-2.5 px-4 bg-white/10 text-white border border-white/20 rounded-lg text-xs font-semibold hover:bg-primary-yellow hover:text-[#1A1F37] hover:border-primary-yellow transition-all"
-                  >
-                    Pharmacist POS
-                  </button>
-                </div>
-              </div>
-
-              {/* Hospital */}
-              <div className="bg-white/5 backdrop-blur rounded-xl p-3 border border-white/10">
-                <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                  <span className="w-2 h-2 bg-primary-yellow rounded-full"></span>
-                  Hospital
-                </h4>
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => handleQuickLogin("admin@hospital.com", "ADMIN", "HOSPITAL")}
-                    className="w-full py-2.5 px-4 bg-primary-yellow text-[#1A1F37] rounded-lg text-xs font-bold hover:bg-primary-yellow-dark hover:scale-[1.02] transition-all shadow-lg shadow-primary-yellow/20"
-                  >
-                    Admin Portal
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickLogin("manager@hospital.com", "MANAGER", "HOSPITAL")}
-                    className="w-full py-2.5 px-4 bg-white/10 text-white border border-white/20 rounded-lg text-xs font-semibold hover:bg-primary-yellow hover:text-[#1A1F37] hover:border-primary-yellow transition-all"
-                  >
-                    Manager Portal
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleQuickLogin("staff@hospital.com", "PHARMACIST", "HOSPITAL")}
-                    className="w-full py-2.5 px-4 bg-white/10 text-white border border-white/20 rounded-lg text-xs font-semibold hover:bg-primary-yellow hover:text-[#1A1F37] hover:border-primary-yellow transition-all"
-                  >
-                    Staff Portal
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>

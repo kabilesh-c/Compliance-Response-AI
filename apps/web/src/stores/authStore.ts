@@ -72,6 +72,7 @@ export const useAuthStore = create<AuthState>()(
 
       logout: () => {
         localStorage.removeItem('token');
+        localStorage.removeItem('hasSeenAIModal'); // Clear AI modal flag on logout
         set({ user: null, token: null, isAuthenticated: false });
       },
 

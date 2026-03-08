@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Search, Bell, ChevronDown, Crown, Brain, Clock, X, Package, ShoppingCart, FileText } from "lucide-react";
+import { Search, Bell, ChevronDown, Crown, Brain, Clock, X, Package, ShoppingCart, FileText, Sparkles } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { useRouter } from "next/navigation";
 import OfflineIndicator from "@/components/ui/OfflineIndicator";
@@ -115,6 +115,16 @@ export default function ManagerTopBar() {
 
       {/* Right Section */}
       <div className="flex items-center gap-4">
+        {/* Compliance AI Button */}
+        <button
+          onClick={() => router.push("/ai-assistant")}
+          className="px-4 py-2 bg-primary-yellow/20 hover:bg-primary-yellow/30 text-primary-yellow-dark font-semibold rounded-full transition-all flex items-center gap-2 border border-primary-yellow/30"
+          title="Open Compliance AI"
+        >
+          <Sparkles size={16} />
+          <span className="hidden lg:inline text-sm">Compliance AI</span>
+        </button>
+
         {/* AI Status */}
         <div className="flex items-center gap-2 px-3 py-1.5 bg-status-success/10 rounded-full">
           <Brain size={14} className="text-status-success" />
