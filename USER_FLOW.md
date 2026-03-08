@@ -17,7 +17,9 @@ Landing Page → Login → Dashboard → AI Assistant Landing → Chatbot Interf
 The user arrives at the main landing page and sees the Compliance Response AI introduction.
 
 <!-- LANDING PAGE SCREENSHOT -->
-![Landing Page](./design%20images/flow/01-landing-page.png)
+<img width="1899" height="859" alt="Screenshot 2026-03-08 051754" src="https://github.com/user-attachments/assets/a7cb4908-01a3-46b1-84d5-6a6b58bfe0d9" />
+
+
 
 <br>
 
@@ -37,7 +39,8 @@ The user arrives at the main landing page and sees the Compliance Response AI in
 User is redirected to the authentication page to sign in with their credentials.
 
 <!-- LOGIN PAGE SCREENSHOT -->
-![Login Page](./design%20images/flow/02-login-page.png)
+<img width="1917" height="912" alt="Screenshot 2026-03-08 051827" src="https://github.com/user-attachments/assets/178f3154-1415-4767-a172-3636168f97b5" />
+
 
 <br>
 
@@ -57,7 +60,8 @@ User is redirected to the authentication page to sign in with their credentials.
 After successful login, the user lands on the main dashboard. A pop-up notification appears prompting the user to try the AI Compliance Assistant.
 
 <!-- DASHBOARD WITH POPUP SCREENSHOT -->
-![Dashboard with Popup](./design%20images/flow/03-dashboard-popup.png)
+<img width="1895" height="908" alt="Screenshot 2026-03-08 051904" src="https://github.com/user-attachments/assets/60af57cc-1325-4ed2-a914-8a50cb6a7de2" />
+
 
 <br>
 
@@ -77,7 +81,8 @@ After successful login, the user lands on the main dashboard. A pop-up notificat
 User arrives at the AI Assistant landing page where they can upload documents and questionnaires.
 
 <!-- AI ASSISTANT LANDING PAGE SCREENSHOT -->
-![AI Assistant Landing](./design%20images/flow/04-ai-landing.png)
+<img width="1919" height="913" alt="Screenshot 2026-03-08 051923" src="https://github.com/user-attachments/assets/c204b2b9-cb02-40c6-8567-690158a604ea" />
+
 
 <br>
 
@@ -97,7 +102,9 @@ User arrives at the AI Assistant landing page where they can upload documents an
 The chatbot interface opens, displaying the AI-generated responses with structured answer cards, citations, confidence scores, and export options.
 
 <!-- CHATBOT INTERFACE SCREENSHOT -->
-![Chatbot Interface](./design%20images/flow/05-chatbot.png)
+<img width="1919" height="917" alt="Screenshot 2026-03-08 025537" src="https://github.com/user-attachments/assets/93347f04-c891-491b-870c-adc317234a03" />
+
+
 
 ---
 
