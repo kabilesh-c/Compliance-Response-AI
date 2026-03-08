@@ -2,6 +2,10 @@
 
 A comprehensive, AI-powered pharmacy management system built with Next.js, TypeScript, Express, and FastAPI. PharmaOS combines modern pharmacy operations with intelligent automation, predictive analytics, and an AI-powered Compliance Response system.
 
+🔗 **Live Demo:** [https://pharmaos.vercel.app](https://pharmaos.vercel.app)
+
+![PharmaOS Landing Page](./docs/images/01-landing-page.png)
+
 ---
 
 ## 🏥 What is PharmaOS?
@@ -87,9 +91,6 @@ These questionnaires must be answered using verified internal documentation, whi
 5. User reviews, edits, and approves responses
 6. System exports the completed questionnaire in the original format
 
-<!-- CHATBOT UI SCREENSHOT -->
-<img width="1919" height="907" alt="Screenshot 2026-03-07 221603" src="https://github.com/user-attachments/assets/72f1f831-11eb-473c-aa81-92984c5f3b14" />
-<!-- Add your chatbot UI screenshot here -->
 
 ---
 
