@@ -2,15 +2,15 @@ import axios from 'axios';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
-// Demo mode flag - set to true to skip all API calls
-const DEMO_MODE = true;
+// Demo mode flag - set to false to use real API
+const DEMO_MODE = false;
 
 export const api = axios.create({
   baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 3000, // 3 second timeout for faster fallback
+  timeout: 120000, // 120 second timeout for AI operations (multi-question answers)
 });
 
 // Add auth token interceptor if needed
@@ -84,18 +84,6 @@ export const authApi = {
   },
   register: async (data: any) => {
     const response = await api.post('/auth/register', data);
-    return response.data;
-  }
-};
-
-export const mlApi = {
-  getForecast: async (periods: number = 30) => {
-    const response = await api.post('/ml/forecast', { periods });
-    return response.data;
-  },
-  
-  optimizeStock: async (productId: string) => {
-    const response = await api.get(`/ml/inventory/optimize/${productId}`);
     return response.data;
   }
 };
