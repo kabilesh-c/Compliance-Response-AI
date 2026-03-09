@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://compliance-response-ai.onrender.com/api';
 
 // Demo mode flag - set to false to use real API
 const DEMO_MODE = false;
