@@ -2,7 +2,10 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import * as admin from 'firebase-admin';
 import crypto from 'crypto';
+import { supabase } from '../config/supabase';
+import { createLogger } from '../utils/logger';
 
+const log = createLogger('AuthMiddleware');
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-in-prod';
 
 /**
@@ -19,6 +22,62 @@ if (!admin.apps.length) {
   admin.initializeApp({
     projectId: process.env.FIREBASE_PROJECT_ID || 'pharmaos-5fc57',
   });
+}
+
+/**
+ * Ensures demo user and organization exist in database.
+ * Creates them if they don't exist, returns the IDs.
+ */
+async function ensureDemoUserExists() {
+  // Use deterministic UUIDs for demo records
+  const demoOrgId = toUuid('demo-retail-org');
+  const demoUserId = toUuid('demo-user-id');
+  const demoEmail = 'demo@pharmaos.com';
+
+  try {
+    // Check if demo organization exists
+    const { data: orgData } = await supabase
+      .from('organizations')
+      .select('id')
+      .eq('id', demoOrgId)
+      .single();
+
+    // Create org if doesn't exist
+    if (!orgData) {
+      await supabase.from('organizations').insert({
+        id: demoOrgId,
+        name: 'Demo Retail Organization',
+        type: 'RETAIL',
+      });
+      log.info('Created demo organization');
+    }
+
+    // Check if demo user exists
+    const { data: userData } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', demoUserId)
+      .single();
+
+    // Create user if doesn't exist
+    if (!userData) {
+      await supabase.from('users').insert({
+        id: demoUserId,
+        email: demoEmail,
+        name: 'Demo User',
+        role: 'ADMIN',
+        organization_id: demoOrgId,
+        password_hash: 'demo-hash', // Not used for demo token auth
+      });
+      log.info('Created demo user');
+    }
+
+    return { userId: demoUserId, organizationId: demoOrgId };
+  } catch (error: any) {
+    log.warn('Failed to ensure demo user exists', { error: error.message });
+    // Return the IDs anyway - they might exist but query failed
+    return { userId: demoUserId, organizationId: demoOrgId };
+  }
 }
 
 export interface AuthRequest extends Request {
@@ -45,11 +104,12 @@ export const authenticateToken = async (req: Request, res: Response, next: NextF
 
   // DEMO MODE: Accept demo token for testing
   if (token === 'demo-token-12345') {
+    const { userId, organizationId } = await ensureDemoUserExists();
     (req as AuthRequest).user = {
-      userId: 'demo-user-id',
+      userId,
       email: 'demo@pharmaos.com',
       role: 'ADMIN',
-      organizationId: 'demo-retail-org',
+      organizationId,
     };
     return next();
   }
