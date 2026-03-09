@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Copy, RefreshCw, ChevronLeft, ChevronRight, Download, FileText } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -9,6 +9,7 @@ import { regenerateSingleQuestion } from '@/services/aiAssistantApi';
 interface Citation {
   document: string;
   page: number | null;
+  snippet?: string;
 }
 
 interface Answer {
@@ -39,12 +40,14 @@ interface QuestionnaireResultProps {
   data: StructuredResponse;
   sessionId?: string;
   questionnaireDocumentType?: 'pdf' | 'docx' | 'md';
+  questionnaireFileName?: string;
 }
 
 export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
   data,
   sessionId,
   questionnaireDocumentType = 'pdf',
+  questionnaireFileName,
 }) => {
   // Version management: Store all versions for each question
   const [versionedAnswers, setVersionedAnswers] = useState<Map<number, VersionedAnswer>>(new Map());
@@ -55,6 +58,24 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
   
   // Loading state for regenerations
   const [regenerating, setRegenerating] = useState<Set<number>>(new Set());
+  
+  // Download dropdown state
+  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
+  const downloadMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close download menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (downloadMenuRef.current && !downloadMenuRef.current.contains(event.target as Node)) {
+        setShowDownloadMenu(false);
+      }
+    };
+    
+    if (showDownloadMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showDownloadMenu]);
 
   // Initialize versions on mount
   useEffect(() => {
@@ -67,6 +88,23 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
     });
     setVersionedAnswers(initialVersions);
   }, [data.answers]);
+
+  // Sanitize markdown from answer text
+  const sanitizeAnswerText = (text: string): string => {
+    return text
+      // Remove markdown headings
+      .replace(/^#{1,6}\s+/gm, '')
+      // Remove bold/italic markers
+      .replace(/\*\*(.+?)\*\*/g, '$1')
+      .replace(/\*(.+?)\*/g, '$1')
+      // Remove code backticks
+      .replace(/`(.+?)`/g, '$1')
+      // Remove bullet markers and convert to clean list
+      .replace(/^\*\s+/gm, '')
+      .replace(/^-\s+/gm, '')
+      // Clean up extra whitespace
+      .trim();
+  };
 
   // Get current answer for a question (with version support)
   const getCurrentAnswer = (questionNumber: number): Answer | undefined => {
@@ -91,13 +129,16 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
     try {
       const newAnswer = await regenerateSingleQuestion(currentAnswer.questionText, sessionId);
       
-      // Add as new version
+      // Add as new version (properly clone to trigger React re-render)
       setVersionedAnswers((prev) => {
         const updated = new Map(prev);
         const versioned = updated.get(questionNumber);
         if (versioned) {
-          versioned.versions.push(newAnswer as Answer);
-          versioned.currentVersionIndex = versioned.versions.length - 1;
+          // Create new object instead of mutating existing one
+          updated.set(questionNumber, {
+            versions: [...versioned.versions, newAnswer as Answer],
+            currentVersionIndex: versioned.versions.length, // Point to new version
+          });
         }
         return updated;
       });
@@ -120,50 +161,63 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
       const versioned = updated.get(questionNumber);
       if (!versioned) return prev;
 
-      if (direction === 'prev' && versioned.currentVersionIndex > 0) {
-        versioned.currentVersionIndex--;
-      } else if (direction === 'next' && versioned.currentVersionIndex < versioned.versions.length - 1) {
-        versioned.currentVersionIndex++;
+      let newIndex = versioned.currentVersionIndex;
+      if (direction === 'prev' && newIndex > 0) {
+        newIndex--;
+      } else if (direction === 'next' && newIndex < versioned.versions.length - 1) {
+        newIndex++;
       }
+      
+      // Only update if index actually changed (create new object to trigger re-render)
+      if (newIndex !== versioned.currentVersionIndex) {
+        updated.set(questionNumber, {
+          ...versioned,
+          currentVersionIndex: newIndex,
+        });
+      }
+      
       return updated;
     });
   };
 
-  // Handle edit mode
-  const handleEditStart = (questionNumber: number, currentText: string) => {
-    setEditingQuestionNumber(questionNumber);
-    setEditedContent((prev) => ({ ...prev, [questionNumber]: currentText }));
-  };
-
-  // Auto-save edited content
-  useEffect(() => {
-    const autoSave = () => {
-      if (editingQuestionNumber !== null && editedContent[editingQuestionNumber]) {
-        // Update the current version's answer text
-        setVersionedAnswers((prev) => {
-          const updated = new Map(prev);
-          const versioned = updated.get(editingQuestionNumber);
-          if (versioned) {
-            const currentVersion = versioned.versions[versioned.currentVersionIndex];
-            currentVersion.answerText = editedContent[editingQuestionNumber];
-          }
-          return updated;
+  // Handle auto-save with debounce
+  const handleAutoSave = (questionNumber: number, newText: string) => {
+    // Update the versioned answers immediately for UI (properly clone)
+    setVersionedAnswers((prev) => {
+      const updated = new Map(prev);
+      const versioned = updated.get(questionNumber);
+      if (versioned) {
+        const updatedVersions = [...versioned.versions];
+        updatedVersions[versioned.currentVersionIndex] = {
+          ...updatedVersions[versioned.currentVersionIndex],
+          answerText: newText
+        };
+        updated.set(questionNumber, {
+          ...versioned,
+          versions: updatedVersions
         });
       }
-    };
+      return updated;
+    });
 
-    // Auto-save 500ms after user stops typing
-    const timer = setTimeout(autoSave, 500);
-    return () => clearTimeout(timer);
-  }, [editedContent, editingQuestionNumber]);
-
-  // Handle blur (exit edit mode)
-  const handleEditBlur = () => {
-    setEditingQuestionNumber(null);
+    // TODO: Call backend API to persist changes
+    // debounced call to: PATCH /api/questions/:id with { answerText: newText }
   };
 
+  // Debounce helper
+  const useDebounce = (callback: Function, delay: number) => {
+    const timeoutRef = useRef<NodeJS.Timeout>();
+    
+    return (...args: any[]) => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => callback(...args), delay);
+    };
+  };
+
+  const debouncedSave = useDebounce(handleAutoSave, 1000);
+
   // Download functionality
-  const handleDownload = async (format: 'pdf' | 'docx') => {
+  const handleDownload = async (format: 'markdown' | 'pdf' | 'docx') => {
     // Generate formatted content using current versions
     let content = `# Questionnaire Response\n\n`;
     content += `## Summary\n${data.summary}\n\n`;
@@ -193,27 +247,129 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
         content += `---\n\n`;
       });
 
+    // Generate filename from questionnaire name or use default
+    const baseFileName = questionnaireFileName 
+      ? questionnaireFileName.replace(/\.[^/.]+$/, '') // Remove extension
+      : 'questionnaire-response';
+
     if (format === 'docx') {
-      // For Word format, we'd use a library like docx or html-docx-js
-      // For now, download as plain text
-      const blob = new Blob([content], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+      // Convert markdown to RTF-like format for better Word compatibility
+      const rtfContent = convertMarkdownToRTF(content);
+      const blob = new Blob([rtfContent], { type: 'application/rtf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `questionnaire-response.docx`;
+      a.download = `${baseFileName}.rtf`;
       a.click();
       URL.revokeObjectURL(url);
+    } else if (format === 'pdf') {
+      // Generate clean HTML for PDF printing
+      const htmlContent = generatePrintableHTML(content, baseFileName);
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(htmlContent);
+        printWindow.document.close();
+        setTimeout(() => {
+          printWindow.print();
+        }, 250);
+      }
     } else {
-      // PDF download would require a library like jsPDF or pdfmake
-      // For now, download as markdown
+      // Markdown format
       const blob = new Blob([content], { type: 'text/markdown' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `questionnaire-response.md`;
+      a.download = `${baseFileName}.md`;
       a.click();
       URL.revokeObjectURL(url);
     }
+    
+    setShowDownloadMenu(false);
+  };
+
+  // Helper function to convert markdown to RTF for Word compatibility
+  const convertMarkdownToRTF = (markdown: string): string => {
+    let rtf = '{\\rtf1\\ansi\\deff0\n';
+    rtf += '{\\fonttbl{\\f0 Arial;}}{\\colortbl;\\red0\\green0\\blue0;}\n';
+    rtf += '\\viewkind4\\uc1\\pard\\f0\\fs24\n';
+    
+    // First, clean the markdown content
+    const cleanedMarkdown = markdown
+      .replace(/\*\*(.*?)\*\*/g, '$1') // Remove bold
+      .replace(/\*(.*?)\*/g, '$1')      // Remove italic
+      .replace(/`(.*?)`/g, '$1')        // Remove code
+      .replace(/#{1,6}\s+/g, '');       // Remove # from headers
+    
+    const lines = cleanedMarkdown.split('\n');
+    lines.forEach(line => {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        rtf += '\\par\n';
+      } else if (trimmed.startsWith('---')) {
+        rtf += '\\par\\pard\\brdrb\\brdrs\\brdrw10\\brsp20\\par\\pard\n';
+      } else if (trimmed.match(/^\d+\./)) {
+        // Numbered list
+        rtf += `${trimmed}\\par\n`;
+      } else if (trimmed.startsWith('- ')) {
+        // Bullet point
+        rtf += `\\bullet ${trimmed.substring(2)}\\par\n`;
+      } else {
+        rtf += `${trimmed}\\par\n`;
+      }
+    });
+    
+    rtf += '}';
+    return rtf;
+  };
+
+  // Helper function to generate clean HTML for PDF printing
+  const generatePrintableHTML = (markdown: string, title: string): string => {
+    // Clean markdown and convert to HTML
+    const cleanText = markdown
+      .replace(/#{1,6}\s+/g, '')         // Remove # headers
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')  // Bold
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')              // Italic
+      .replace(/`(.*?)`/g, '<code>$1</code>')            // Code
+      .replace(/^---$/gm, '<hr />')                       // Horizontal rule
+      .replace(/^- (.+)$/gm, '<li>$1</li>')              // List items
+      .replace(/\n\n/g, '</p><p>')                        // Paragraphs
+      .replace(/<li>/g, '<ul><li>')                       // Start ul
+      .replace(/<\/li>\n(?!<li>)/g, '</li></ul>');       // End ul
+    
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>${title}</title>
+        <style>
+          @media print {
+            body { margin: 0; }
+            @page { margin: 2cm; }
+          }
+          body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+            color: #333;
+          }
+          h1 { font-size: 24px; margin-bottom: 20px; }
+          h2 { font-size: 20px; margin-top: 20px; margin-bottom: 10px; }
+          p { margin: 10px 0; }
+          ul { margin: 5px 0; padding-left: 20px; }
+          li { margin: 5px 0; }
+          hr { border: 1px solid #ccc; margin: 20px 0; }
+          strong { font-weight: bold; }
+          code { background: #f4f4f4; padding: 2px 4px; border-radius: 3px; }
+        </style>
+      </head>
+      <body>
+        <p>${cleanText}</p>
+      </body>
+      </html>
+    `;
   };
 
   return (
@@ -222,9 +378,11 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="prose prose-sm max-w-none dark:prose-invert"
+        style={{ backgroundColor: 'rgba(19, 78, 74, 0.3)' }}
+        className="p-4 backdrop-blur-sm rounded-lg border border-teal-600/30"
       >
-        <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{data.summary}</p>
+        <div className="text-xs font-semibold text-emerald-400 mb-2 uppercase tracking-wide">SUMMARY</div>
+        <p className="text-white leading-relaxed text-sm">{data.summary}</p>
       </motion.div>
 
       {/* Stats Panel */}
@@ -232,25 +390,29 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
-        className="grid grid-cols-4 gap-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-lg border border-blue-200 dark:border-blue-800"
+        style={{ 
+          backgroundColor: 'rgba(19, 78, 74, 0.3)',
+          backgroundImage: 'linear-gradient(to right, rgba(6, 78, 59, 0.4), rgba(19, 78, 74, 0.4))'
+        }}
+        className="grid grid-cols-4 gap-4 p-4 backdrop-blur-md rounded-lg border border-emerald-600/30"
       >
         <div className="text-center">
-          <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{data.totalQuestions}</div>
-          <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">Total Questions</div>
+          <div className="text-2xl font-bold text-blue-400">{data.totalQuestions}</div>
+          <div className="text-xs text-gray-300 mt-1">Total Questions</div>
         </div>
         <div className="text-center">
-          <div className="text-2xl font-bold text-green-600 dark:text-green-400">{data.answeredQuestions}</div>
-          <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">Answered</div>
+          <div className="text-2xl font-bold text-green-400">{data.answeredQuestions}</div>
+          <div className="text-xs text-gray-300 mt-1">Answered</div>
         </div>
         <div className="text-center">
-          <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{data.totalCitations}</div>
-          <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">Citations</div>
+          <div className="text-2xl font-bold text-purple-400">{data.totalCitations}</div>
+          <div className="text-xs text-gray-300 mt-1">Citations</div>
         </div>
         <div className="text-center">
-          <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">
+          <div className="text-2xl font-bold text-orange-400">
             {(data.overallConfidence * 100).toFixed(0)}%
           </div>
-          <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">Confidence</div>
+          <div className="text-xs text-gray-300 mt-1">Confidence</div>
         </div>
       </motion.div>
 
@@ -260,7 +422,7 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
           {Array.from(versionedAnswers.entries()).map(([questionNumber, versioned], index) => {
             const answer = versioned.versions[versioned.currentVersionIndex];
             const isRegenerating = regenerating.has(questionNumber);
-            const isEditing = editingQuestionNumber === questionNumber;
+            const sanitizedAnswer = sanitizeAnswerText(answer.answerText);
 
             return (
               <motion.div
@@ -268,60 +430,53 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 + index * 0.05 }}
-                className={`group relative p-6 rounded-lg border transition-all duration-200 ${
+                style={{ backgroundColor: 'rgba(19, 78, 74, 0.3)' }}
+                className={`group relative p-6 rounded-lg border transition-all duration-200 backdrop-blur-md ${
                   answer.status === 'not_found'
-                    ? 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800'
-                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-700'
-                } ${isEditing ? 'ring-2 ring-blue-500 dark:ring-blue-400' : ''}`}
-                onClick={(e) => {
-                  if (!isEditing && e.target === e.currentTarget) {
-                    handleEditStart(answer.questionNumber, answer.answerText);
-                  }
-                }}
+                    ? 'border-red-600/30'
+                    : 'border-teal-600/30 hover:border-emerald-500/50'
+                }`}
               >
                 {/* Serial Number Badge */}
-                <div className="absolute -top-3 -left-3 w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-lg">
+                <div className="absolute -top-3 -left-3 w-8 h-8 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-lg">
                   {answer.questionNumber}
                 </div>
 
-                {/* Question */}
-                <div className="mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                    {answer.questionText}
-                  </h3>
+                {/* Question (Editable) */}
+                <div
+                  contentEditable={true}
+                  suppressContentEditableWarning={true}
+                  onBlur={(e) => {
+                    const newText = e.currentTarget.textContent || '';
+                    if (newText !== answer.questionText) {
+                      debouncedSave(answer.questionNumber, newText);
+                    }
+                  }}
+                  className="mb-4 text-lg font-semibold text-white focus:outline-none cursor-text"
+                >
+                  {answer.questionText}
                 </div>
 
-                {/* Answer (Editable) */}
-                {isEditing ? (
-                  <textarea
-                    value={editedContent[answer.questionNumber] || answer.answerText}
-                    onChange={(e) => {
-                      setEditedContent((prev) => ({
-                        ...prev,
-                        [answer.questionNumber]: e.target.value,
-                      }));
-                    }}
-                    onBlur={handleEditBlur}
-                    autoFocus
-                    className="w-full mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-300 dark:border-blue-700 rounded-lg text-gray-900 dark:text-gray-100 text-sm leading-relaxed resize-y min-h-[150px] focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                ) : (
-                  <div
-                    onClick={() => handleEditStart(answer.questionNumber, answer.answerText)}
-                    className="prose prose-sm max-w-none dark:prose-invert mb-4 cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-900/10 p-3 rounded transition-colors"
-                    title="Click to edit"
-                  >
-                    <ReactMarkdown>{answer.answerText}</ReactMarkdown>
-                  </div>
-                )}
+                {/* Answer (Seamless Editable) */}
+                <div
+                  contentEditable={true}
+                  suppressContentEditableWarning={true}
+                  onInput={(e) => {
+                    const newText = e.currentTarget.textContent || '';
+                    debouncedSave(answer.questionNumber, newText);
+                  }}
+                  className="mb-4 text-gray-100 text-sm leading-relaxed min-h-[100px] focus:outline-none cursor-text whitespace-pre-wrap"
+                >
+                  {sanitizedAnswer}
+                </div>
 
                 {/* Confidence Bar */}
                 <div className="mb-4">
-                  <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
+                  <div className="flex items-center justify-between text-xs text-gray-300 mb-1">
                     <span>Confidence</span>
                     <span className="font-semibold">{(answer.confidence * 100).toFixed(1)}%</span>
                   </div>
-                  <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                  <div className="w-full h-2 bg-black/30 rounded-full overflow-hidden">
                     <motion.div
                       initial={{ width: 0 }}
                       animate={{ width: `${answer.confidence * 100}%` }}
@@ -337,17 +492,33 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
                   </div>
                 </div>
 
-                {/* Citations */}
+                {/* References with Evidence Snippets (Editable) */}
                 {answer.citations.length > 0 && (
-                  <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-900/50 rounded border border-gray-200 dark:border-gray-700">
-                    <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  <div className="mb-4">
+                    <div className="text-xs font-semibold text-emerald-400 mb-3">
                       References:
                     </div>
-                    <div className="space-y-1">
+                    <div
+                      contentEditable={true}
+                      suppressContentEditableWarning={true}
+                      className="space-y-2 focus:outline-none cursor-text"
+                    >
                       {answer.citations.map((cite, idx) => (
-                        <div key={idx} className="text-xs text-gray-600 dark:text-gray-400">
-                          {idx + 1}. {cite.document}
-                          {cite.page && <span className="text-gray-500"> (Page {cite.page})</span>}
+                        <div 
+                          key={idx} 
+                          className="bg-emerald-900/30 border-l-2 border-emerald-400 rounded-lg p-3"
+                        >
+                          {/* Document Name and Page */}
+                          <div className="text-xs font-medium text-emerald-300 mb-1">
+                            {idx + 1}. {cite.document}
+                            {cite.page && <span className="text-gray-400"> (Page {cite.page})</span>}
+                          </div>
+                          {/* Supporting Text Snippet (Clean format without markdown) */}
+                          {cite.snippet && (
+                            <div className="text-xs text-gray-400 leading-relaxed">
+                              {sanitizeAnswerText(cite.snippet)}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -355,12 +526,12 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
                 )}
 
                 {/* Action Buttons */}
-                <div className="flex items-center justify-between pt-3 border-t border-gray-200 dark:border-gray-700">
+                <div className="flex items-center justify-between pt-3 border-t border-teal-700/30">
                   <div className="flex items-center gap-2">
                     {/* Copy Button */}
                     <button
                       onClick={() => handleCopy(answer.answerText, answer.questionNumber)}
-                      className="p-2 text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded transition-colors"
+                      className="p-2 text-gray-400 hover:text-emerald-400 hover:bg-emerald-900/30 rounded transition-colors"
                       title="Copy answer"
                     >
                       <Copy className="w-4 h-4" />
@@ -370,7 +541,7 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
                     <button
                       onClick={() => handleRegenerate(answer.questionNumber)}
                       disabled={isRegenerating}
-                      className={`p-2 text-gray-500 hover:text-green-600 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 rounded transition-colors ${
+                      className={`p-2 text-gray-400 hover:text-green-400 hover:bg-green-900/30 rounded transition-colors ${
                         isRegenerating ? 'animate-spin' : ''
                       }`}
                       title="Regenerate answer"
@@ -385,18 +556,18 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
                       <button
                         onClick={() => handleVersionChange(answer.questionNumber, 'prev')}
                         disabled={versioned.currentVersionIndex === 0}
-                        className="p-1 text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 disabled:opacity-30 disabled:cursor-not-allowed rounded transition-colors"
+                        className="p-1 text-gray-400 hover:text-emerald-400 disabled:opacity-30 disabled:cursor-not-allowed rounded transition-colors"
                         title="Previous version"
                       >
                         <ChevronLeft className="w-4 h-4" />
                       </button>
-                      <span className="text-xs text-gray-600 dark:text-gray-400 font-medium px-2">
+                      <span className="text-xs text-gray-300 font-medium px-2">
                         Version {versioned.currentVersionIndex + 1}/{versioned.versions.length}
                       </span>
                       <button
                         onClick={() => handleVersionChange(answer.questionNumber, 'next')}
                         disabled={versioned.currentVersionIndex === versioned.versions.length - 1}
-                        className="p-1 text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 disabled:opacity-30 disabled:cursor-not-allowed rounded transition-colors"
+                        className="p-1 text-gray-400 hover:text-emerald-400 disabled:opacity-30 disabled:cursor-not-allowed rounded transition-colors"
                         title="Next version"
                       >
                         <ChevronRight className="w-4 h-4" />
@@ -415,22 +586,63 @@ export const QuestionnaireResult: React.FC<QuestionnaireResultProps> = ({
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3 }}
-        className="flex justify-center gap-4 pt-6 border-t border-gray-200 dark:border-gray-700"
+        className="flex justify-center pt-6 border-t border-teal-700/30 relative"
       >
-        <button
-          onClick={() => handleDownload('pdf')}
-          className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white rounded-lg font-medium transition-all shadow-lg hover:shadow-xl"
-        >
-          <FileText className="w-5 h-5" />
-          Download as PDF
-        </button>
-        <button
-          onClick={() => handleDownload('docx')}
-          className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white rounded-lg font-medium transition-all shadow-lg hover:shadow-xl"
-        >
-          <Download className="w-5 h-5" />
-          Download as Word
-        </button>
+        <div className="relative" ref={downloadMenuRef}>
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setShowDownloadMenu(!showDownloadMenu)}
+            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg font-medium transition-all shadow-lg hover:shadow-xl"
+          >
+            <Download className="w-5 h-5" />
+            <span>Download</span>
+          </motion.button>
+          
+          {/* Dropdown Menu */}
+          <AnimatePresence>
+            {showDownloadMenu && (
+              <motion.div
+                initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                transition={{ duration: 0.2 }}
+                className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 bg-gray-900 border border-teal-600/30 rounded-lg shadow-xl overflow-hidden backdrop-blur-md"
+              >
+                <button
+                  onClick={() => handleDownload('markdown')}
+                  className="w-full px-4 py-3 text-left text-white hover:bg-emerald-600/20 transition-colors flex items-center gap-3 border-b border-teal-700/30"
+                >
+                  <FileText className="w-4 h-4" />
+                  <div>
+                    <div className="font-medium text-sm">Default (Markdown)</div>
+                    <div className="text-xs text-gray-400">{questionnaireFileName || 'questionnaire-response'}.md</div>
+                  </div>
+                </button>
+                <button
+                  onClick={() => handleDownload('pdf')}
+                  className="w-full px-4 py-3 text-left text-white hover:bg-red-600/20 transition-colors flex items-center gap-3 border-b border-teal-700/30"
+                >
+                  <FileText className="w-4 h-4 text-red-400" />
+                  <div>
+                    <div className="font-medium text-sm">PDF</div>
+                    <div className="text-xs text-gray-400">{questionnaireFileName?.replace(/\.[^/.]+$/, '') || 'questionnaire-response'}.pdf</div>
+                  </div>
+                </button>
+                <button
+                  onClick={() => handleDownload('docx')}
+                  className="w-full px-4 py-3 text-left text-white hover:bg-blue-600/20 transition-colors flex items-center gap-3"
+                >
+                  <Download className="w-4 h-4 text-blue-400" />
+                  <div>
+                    <div className="font-medium text-sm">Word Document</div>
+                    <div className="text-xs text-gray-400">{questionnaireFileName?.replace(/\.[^/.]+$/, '') || 'questionnaire-response'}.rtf</div>
+                  </div>
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </motion.div>
     </div>
   );
