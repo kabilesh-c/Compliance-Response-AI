@@ -43,6 +43,17 @@ export const authenticateToken = async (req: Request, res: Response, next: NextF
     return res.status(401).json({ error: 'Access token required' });
   }
 
+  // DEMO MODE: Accept demo token for testing
+  if (token === 'demo-token-12345') {
+    (req as AuthRequest).user = {
+      userId: 'demo-user-id',
+      email: 'demo@pharmaos.com',
+      role: 'ADMIN',
+      organizationId: 'demo-retail-org',
+    };
+    return next();
+  }
+
   // Try custom JWT first (from backend /api/auth/login)
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as any;
