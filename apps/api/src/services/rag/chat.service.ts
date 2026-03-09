@@ -61,7 +61,7 @@ export interface StructuredAnswer {
   questionNumber: number;
   questionText: string;
   answerText: string;
-  citations: { document: string; page: number | null }[];
+  citations: { document: string; page: number | null; snippet?: string }[];
   evidenceSnippet: string;
   confidence: number;
   status: 'answered' | 'not_found';
@@ -402,7 +402,8 @@ export class ChatService {
               answerText: a.answerText || 'No answer generated.',
               citations: (a.citations || a.sources || []).map((s: any) => ({ 
                 document: s.document || '', 
-                page: typeof s.page === 'number' ? s.page : null 
+                page: typeof s.page === 'number' ? s.page : null,
+                snippet: s.snippet || undefined
               })),
               evidenceSnippet: a.evidenceSnippet || a.referenceExcerpt || '',
               confidence: typeof a.confidence === 'number' ? Math.min(Math.max(a.confidence, 0), 1) : 0,
@@ -520,7 +521,8 @@ export class ChatService {
           answerText: a.answerText || 'No answer generated.',
           citations: (a.citations || a.sources || []).map((s: any) => ({ 
             document: s.document || '', 
-            page: typeof s.page === 'number' ? s.page : null 
+            page: typeof s.page === 'number' ? s.page : null,
+            snippet: s.snippet || undefined
           })),
           evidenceSnippet: a.evidenceSnippet || a.referenceExcerpt || '',
           confidence: typeof a.confidence === 'number' ? Math.min(Math.max(a.confidence, 0), 1) : 0,
@@ -531,12 +533,16 @@ export class ChatService {
       log.warn('Failed to parse regenerated answer JSON', { error: e.message });
     }
 
-    // Fallback: return raw text as answer
+    // Fallback: return raw text as answer with snippets from RAG citations
     return {
       questionNumber: 1,
       questionText,
       answerText: ragResult.answerText,
-      citations: (ragResult.citations || []).map((c: any) => ({ document: c.document || '', page: c.page ?? null })),
+      citations: (ragResult.citations || []).map((c: any) => ({ 
+        document: c.document || '', 
+        page: c.page ?? null,
+        snippet: c.snippet || undefined
+      })),
       evidenceSnippet: '',
       confidence: ragResult.confidence || 0,
       status: 'answered',
