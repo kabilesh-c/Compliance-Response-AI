@@ -4,6 +4,8 @@ A comprehensive, AI-powered pharmacy management system built with Next.js, TypeS
 
 🔗 **Live Demo:** [https://pharmaos.vercel.app](https://pharmaos.vercel.app)
 
+📚 **Documentation:** [Architecture](./ARCHITECTURE.md) | [API Docs](./API_DOCUMENTATION.md) | [Features](./FEATURES.md) | [Deployment](./DEPLOYMENT.md) | [Security](./SECURITY.md)
+
 ![PharmaOS Landing Page](./docs/images/01-landing-page.png)
 
 ---
