@@ -9,6 +9,7 @@ export interface Citation {
   document: string;
   page: number | null;
   chunkId: string;
+  snippet: string;
 }
 
 export interface EvidenceSnippet {
@@ -95,7 +96,7 @@ export class RagService {
         '      "questionNumber": 1,',
         '      "questionText": "exact question text",',
         '      "answerText": "generated grounded answer in Markdown — use **bold**, bullet lists, headings",',
-        '      "citations": [{"document": "document_name", "page": number}],',
+        '      "citations": [{"document": "document_name", "page": number, "snippet": "short excerpt from this document (max 200 chars)"}],',
         '      "evidenceSnippet": "short excerpt from source (max 250 chars)",',
         '      "confidence": 0.85,',
         '      "status": "answered" | "not_found"',
@@ -109,6 +110,7 @@ export class RagService {
         '- "confidence" must be 0.0–1.0 based on how thoroughly the references address the question.',
         '- "evidenceSnippet" must be a verbatim quote from the provided sources — not paraphrased.',
         '- "citations" must list only documents where you found the answer.',
+        '- Each citation must include a "snippet" field with a short excerpt (max 200 chars) from that document that supports the answer.',
         '- answerText must be detailed and well-structured. Use ## headings, **bold**, bullet points.',
         '- If a question cannot be answered using references, return: status = "not_found", answerText = "Not found in references."',
         '- Do NOT return free-form responses or text outside the JSON object.',
@@ -203,6 +205,32 @@ export class RagService {
   }
 
   /**
+   * Sanitize markdown and extract clean snippet from chunk text.
+   */
+  private sanitizeSnippet(text: string, maxLength: number = 200): string {
+    let cleaned = text
+      // Remove markdown headings
+      .replace(/^#{1,6}\s+/gm, '')
+      // Remove bold/italic markers
+      .replace(/\*\*(.+?)\*\*/g, '$1')
+      .replace(/\*(.+?)\*/g, '$1')
+      // Remove code backticks
+      .replace(/`(.+?)`/g, '$1')
+      // Remove bullet markers
+      .replace(/^[\*\-]\s+/gm, '')
+      // Collapse multiple spaces/newlines
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // Truncate to maxLength
+    if (cleaned.length > maxLength) {
+      cleaned = cleaned.substring(0, maxLength).trim() + '...';
+    }
+
+    return cleaned;
+  }
+
+  /**
    * Extract deduplicated citations from retrieved chunks.
    */
   extractCitations(chunks: SearchResult[]): Citation[] {
@@ -217,6 +245,7 @@ export class RagService {
           document: chunk.documentName,
           page: chunk.pageNumber,
           chunkId: chunk.id,
+          snippet: this.sanitizeSnippet(chunk.chunkText),
         });
       }
     }
