@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Send, Upload, FileText, X, Mic, FileUp, ArrowLeft, Loader2, CheckCircle } from "lucide-react";
 import ChatWorkspace from "@/components/ai-assistant/ChatWorkspace";
 import { uploadQuestionnaire, uploadReferenceDocument, getDocumentStatus } from "@/services/aiAssistantApi";
+import { useAuthStore } from "@/stores/authStore";
 
 interface UploadedFile {
   name: string;
@@ -17,6 +18,7 @@ interface UploadedFile {
 function AIAssistantContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { user, mode } = useAuthStore();
   const isChatActive = searchParams.get('mode') === 'chat';
   
   const [message, setMessage] = useState("");
@@ -88,6 +90,30 @@ function AIAssistantContent() {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
+    }
+  };
+
+  const handleBackToDashboard = () => {
+    if (mode === "HOSPITAL") {
+      router.push("/hospital/admin");
+      return;
+    }
+
+    switch (user?.role) {
+      case "ADMIN":
+        router.push("/admin/dashboard");
+        return;
+      case "MANAGER":
+        router.push("/manager");
+        return;
+      case "PHARMACIST":
+        router.push("/pharmacist/dashboard");
+        return;
+      case "PROCUREMENT":
+        router.push("/procurement");
+        return;
+      default:
+        router.push("/dashboard");
     }
   };
 
@@ -186,7 +212,7 @@ function AIAssistantContent() {
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            onClick={() => router.back()}
+            onClick={handleBackToDashboard}
             className="flex items-center gap-2 px-4 py-2.5 bg-black/30 backdrop-blur-xl border-2 border-gray-700/50 hover:bg-black/40 hover:border-gray-600/60 rounded-full transition-all shadow-lg"
           >
             <ArrowLeft className="w-5 h-5 text-white" />

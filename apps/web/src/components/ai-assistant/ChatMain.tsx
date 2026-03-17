@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Mic, FileUp, Copy, ThumbsUp, ThumbsDown, RotateCcw, MoreHorizontal, Loader2, FileText, Download, X, Eye, ChevronLeft, ChevronRight, Check, Edit3 } from "lucide-react";
+import { Send, Mic, FileUp, Copy, ThumbsUp, ThumbsDown, RotateCcw, MoreHorizontal, Loader2, FileText, Download, X, Eye, ChevronLeft, ChevronRight, Check, Edit3, ArrowLeft } from "lucide-react";
+import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { sendChatMessage, getChatSession, getQuestions, exportQuestionnaire, regenerateSingleQuestion, uploadQuestionnaire, uploadReferenceDocument, getDocumentStatus, StructuredAnswerItem, StructuredAnswersResponse } from "@/services/aiAssistantApi";
@@ -54,6 +55,7 @@ interface Message {
 }
 
 export default function ChatMain({ initialMessage, uploadedFiles, sessionId: externalSessionId, onSessionCreated }: ChatMainProps) {
+  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isFocused, setIsFocused] = useState(false);
@@ -456,7 +458,16 @@ export default function ChatMain({ initialMessage, uploadedFiles, sessionId: ext
     <div className="flex flex-col flex-1 h-full relative overflow-hidden bg-black/20 backdrop-blur-xl border-x border-white/5">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/5 backdrop-blur-md">
-        <h2 className="text-lg font-semibold text-white">Assistant Chat</h2>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => router.push('/ai-assistant')}
+            className="flex items-center gap-2 px-3 py-1.5 bg-black/30 backdrop-blur-xl border border-gray-700/50 hover:bg-black/40 hover:border-gray-600/60 rounded-full transition-all text-gray-200 hover:text-white"
+          >
+            <ArrowLeft size={14} />
+            <span className="text-xs font-medium">Back</span>
+          </button>
+          <h2 className="text-lg font-semibold text-white">Assistant Chat</h2>
+        </div>
         <div className="flex gap-2">
            <button className="p-2 hover:bg-white/10 rounded-full text-gray-400 hover:text-white transition-colors">
             <MoreHorizontal size={18} />
