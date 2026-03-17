@@ -54,6 +54,91 @@ interface Message {
   questionCards?: QuestionCardState[];
 }
 
+function tryParseStructuredResponse(text?: string | null): StructuredAnswersResponse | null {
+  if (!text || typeof text !== "string") return null;
+  if (!text.includes("answers")) return null;
+
+  let cleaned = text.trim();
+  cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+  }
+
+  const attemptParse = (value: string): any | null => {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  };
+
+  let parsed = attemptParse(cleaned);
+  if (!parsed) {
+    const withoutTrailingCommas = cleaned
+      .replace(/,\s*}/g, "}")
+      .replace(/,\s*]/g, "]");
+    parsed = attemptParse(withoutTrailingCommas);
+  }
+
+  if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as any).answers)) {
+    return null;
+  }
+
+  const answers: StructuredAnswerItem[] = (parsed.answers as any[]).map((item, idx) => {
+    const answerText = typeof item?.answerText === "string"
+      ? item.answerText
+      : typeof item?.answer === "string"
+        ? item.answer
+        : "";
+
+    const citationSource = Array.isArray(item?.citations)
+      ? item.citations
+      : Array.isArray(item?.sources)
+        ? item.sources
+        : [];
+
+    const citations = citationSource.map((c: any) => ({
+      document: typeof c?.document === "string" ? c.document : "Unknown",
+      page: typeof c?.page === "number" ? c.page : null,
+    }));
+
+    return {
+      questionNumber: typeof item?.questionNumber === "number" ? item.questionNumber : idx + 1,
+      questionText: typeof item?.questionText === "string" ? item.questionText : `Question ${idx + 1}`,
+      answerText,
+      citations,
+      evidenceSnippet: typeof item?.evidenceSnippet === "string"
+        ? item.evidenceSnippet
+        : typeof item?.referenceExcerpt === "string"
+          ? item.referenceExcerpt
+          : "",
+      confidence: typeof item?.confidence === "number" ? item.confidence : 0,
+      status: item?.status === "not_found" || !answerText ? "not_found" : "answered",
+      sources: citations,
+      referenceExcerpt: typeof item?.referenceExcerpt === "string" ? item.referenceExcerpt : undefined,
+    };
+  });
+
+  const answeredQuestions = answers.filter(a => a.status === "answered").length;
+  const overallConfidence = answeredQuestions > 0
+    ? answers.filter(a => a.status === "answered").reduce((sum, a) => sum + a.confidence, 0) / answeredQuestions
+    : 0;
+
+  return {
+    summary: typeof (parsed as any).summary === "string" ? (parsed as any).summary : "",
+    totalQuestions: typeof (parsed as any).totalQuestions === "number" ? (parsed as any).totalQuestions : answers.length,
+    answeredQuestions: typeof (parsed as any).answeredQuestions === "number" ? (parsed as any).answeredQuestions : answeredQuestions,
+    overallConfidence: typeof (parsed as any).overallConfidence === "number" ? (parsed as any).overallConfidence : overallConfidence,
+    totalCitations: typeof (parsed as any).totalCitations === "number"
+      ? (parsed as any).totalCitations
+      : answers.reduce((sum, a) => sum + a.citations.length, 0),
+    answers,
+  };
+}
+
 export default function ChatMain({ initialMessage, uploadedFiles, sessionId: externalSessionId, onSessionCreated }: ChatMainProps) {
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -109,9 +194,13 @@ export default function ChatMain({ initialMessage, uploadedFiles, sessionId: ext
             confidence: m.confidence,
           };
           // Reconstruct per-question cards from persisted structuredData
-          if (m.structuredData?.answers) {
-            base.structuredAnswers = m.structuredData;
-            base.questionCards = m.structuredData.answers.map((a: any) => ({
+          const structuredFromMessage = m.structuredData?.answers
+            ? m.structuredData
+            : tryParseStructuredResponse(m.content);
+
+          if (structuredFromMessage?.answers) {
+            base.structuredAnswers = structuredFromMessage;
+            base.questionCards = structuredFromMessage.answers.map((a: any) => ({
               questionNumber: a.questionNumber,
               questionText: a.questionText,
               versions: [{
@@ -184,9 +273,10 @@ export default function ChatMain({ initialMessage, uploadedFiles, sessionId: ext
       }
 
       // Build per-question cards if structured response is available
+      const resolvedStructuredAnswers = result.structuredAnswers || tryParseStructuredResponse(result.answer);
       let questionCards: QuestionCardState[] | undefined;
-      if (result.structuredAnswers?.answers) {
-        questionCards = result.structuredAnswers.answers.map(a => ({
+      if (resolvedStructuredAnswers?.answers) {
+        questionCards = resolvedStructuredAnswers.answers.map(a => ({
           questionNumber: a.questionNumber,
           questionText: a.questionText,
           versions: [{
@@ -214,7 +304,7 @@ export default function ChatMain({ initialMessage, uploadedFiles, sessionId: ext
                 confidence: result.confidence,
                 isStreaming: false,
                 questionnaireId: result.questionnaireId,
-                structuredAnswers: result.structuredAnswers,
+                structuredAnswers: resolvedStructuredAnswers,
                 questionCards,
               }
             : m
