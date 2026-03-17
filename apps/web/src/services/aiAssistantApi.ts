@@ -206,18 +206,104 @@ export interface StructuredAnswersResponse {
   answers: StructuredAnswerItem[];
 }
 
+function normalizeStructuredAnswers(payload: unknown): StructuredAnswersResponse | null {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const source = payload as Record<string, unknown>;
+  const rawAnswers = Array.isArray(source.answers) ? source.answers : null;
+  if (!rawAnswers) return null;
+
+  const answers: StructuredAnswerItem[] = rawAnswers.map((item, index) => {
+    const row = (item ?? {}) as Record<string, unknown>;
+    const answerText = typeof row.answerText === 'string'
+      ? row.answerText
+      : typeof row.answer === 'string'
+        ? row.answer
+        : '';
+
+    const citationsSource = Array.isArray(row.citations)
+      ? row.citations
+      : Array.isArray(row.sources)
+        ? row.sources
+        : [];
+
+    const citations = citationsSource
+      .map((citation): { document: string; page: number | null } | null => {
+        if (!citation || typeof citation !== 'object') return null;
+        const entry = citation as Record<string, unknown>;
+        const document = typeof entry.document === 'string' ? entry.document : 'Unknown';
+        const page = typeof entry.page === 'number' ? entry.page : null;
+        return { document, page };
+      })
+      .filter((citation): citation is { document: string; page: number | null } => citation !== null);
+
+    const statusRaw = row.status;
+    const normalizedStatus: 'answered' | 'not_found' =
+      statusRaw === 'not_found' || (!answerText && statusRaw !== 'answered')
+        ? 'not_found'
+        : 'answered';
+
+    return {
+      questionNumber: typeof row.questionNumber === 'number' ? row.questionNumber : index + 1,
+      questionText: typeof row.questionText === 'string' ? row.questionText : `Question ${index + 1}`,
+      answerText,
+      citations,
+      evidenceSnippet: typeof row.evidenceSnippet === 'string'
+        ? row.evidenceSnippet
+        : typeof row.referenceExcerpt === 'string'
+          ? row.referenceExcerpt
+          : '',
+      confidence: typeof row.confidence === 'number' ? row.confidence : 0,
+      status: normalizedStatus,
+      sources: citations,
+      referenceExcerpt: typeof row.referenceExcerpt === 'string' ? row.referenceExcerpt : undefined,
+    };
+  });
+
+  const answeredQuestions = answers.filter(a => a.status === 'answered').length;
+  const totalCitations = answers.reduce((sum, answer) => sum + answer.citations.length, 0);
+  const avgConfidence = answers.length
+    ? answers.reduce((sum, answer) => sum + answer.confidence, 0) / answers.length
+    : 0;
+
+  return {
+    summary: typeof source.summary === 'string' ? source.summary : '',
+    totalQuestions: typeof source.totalQuestions === 'number' ? source.totalQuestions : answers.length,
+    answeredQuestions: typeof source.answeredQuestions === 'number' ? source.answeredQuestions : answeredQuestions,
+    overallConfidence: typeof source.overallConfidence === 'number' ? source.overallConfidence : avgConfidence,
+    totalCitations: typeof source.totalCitations === 'number' ? source.totalCitations : totalCitations,
+    answers,
+  };
+}
+
 // ── Chat APIs ──────────────────────────────────────────────────────────────
 
 export async function sendChatMessage(message: string, sessionId?: string, questionnaireDocumentId?: string) {
   const res = await api.post('/chat', { message, sessionId, questionnaireDocumentId });
-  return res.data as {
+  const data = res.data as {
     sessionId: string;
     answer: string;
     citations: any[];
     confidence: number;
     evidenceSnippets: { chunkText: string; documentName: string; pageNumber: number | null }[];
     questionnaireId: string | null;
-    structuredAnswers: StructuredAnswersResponse | null;
+    structuredAnswers: StructuredAnswersResponse | null | string;
+  };
+
+  let structuredAnswers = normalizeStructuredAnswers(data.structuredAnswers);
+
+  if (!structuredAnswers && typeof data.answer === 'string') {
+    try {
+      const parsed = JSON.parse(data.answer);
+      structuredAnswers = normalizeStructuredAnswers(parsed);
+    } catch {
+      // Non-JSON answer text is expected in standard chat flows.
+    }
+  }
+
+  return {
+    ...data,
+    structuredAnswers,
   };
 }
 
