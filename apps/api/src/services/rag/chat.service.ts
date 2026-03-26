@@ -106,6 +106,50 @@ function robustJsonParse(jsonString: string): any {
 }
 
 /**
+ * Advanced JSON recovery with more aggressive heuristics for LLM-generated JSON.
+ * Fixes common mistakes: unquoted keys, escaped newlines in strings, formatting issues, etc.
+ */
+function robustJsonParseAdvanced(jsonString: string): any {
+  let cleaned = jsonString.trim();
+  
+  // Remove markdown code fences
+  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  
+  // Extract JSON region (first { to last })
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+  }
+  
+  // Attempt 1: Direct parse
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    // continue
+  }
+  
+  // Attempt 2: Fix trailing commas and newlines
+  let fixed = cleaned.replace(/,\s*([}\]])/g, '$1').replace(/\n/g, ' ');
+  try {
+    return JSON.parse(fixed);
+  } catch (e) {
+    // continue
+  }
+  
+  // Attempt 3: Fix unquoted keys (risky, use only as last resort)
+  try {
+    let fixedKeys = fixed.replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":');
+    return JSON.parse(fixedKeys);
+  } catch (e) {
+    // continue
+  }
+  
+  // Give up
+  throw new Error('Failed to parse JSON response after advanced recovery attempts');
+}
+
+/**
  * Conversational Chat Service — manages chat sessions and
  * generates context-aware responses using the RAG pipeline.
  */
@@ -388,7 +432,14 @@ export class ChatService {
     let structuredAnswers: StructuredResponse | undefined;
     if (isStructured) {
       try {
-        const parsed = robustJsonParse(ragResult.answerText);
+        let parsed;
+        try {
+          parsed = robustJsonParse(ragResult.answerText);
+        } catch (initialErr) {
+          // Try advanced parser as fallback
+          log.info('Initial JSON parser failed, attempting advanced recovery', { error: (initialErr as Error).message });
+          parsed = robustJsonParseAdvanced(ragResult.answerText);
+        }
         
         if (parsed && typeof parsed === 'object') {
           // Validate structure and map fields
@@ -432,14 +483,17 @@ export class ChatService {
           // Relevance check: force not_found if answer doesn't reference chunks (implementation detail: check citations/snippets if available)
           // However, for now we trust the LLM's own status determination unless it's obviously empty.
           
-          log.info('Parsed structured questionnaire response', { questionCount: structuredAnswers.answers.length, answeredCount: structuredAnswers.answeredQuestions });
+          log.info('✓ Successfully parsed structured questionnaire response', { questionCount: structuredAnswers.answers.length, answeredCount: structuredAnswers.answeredQuestions });
         }
       } catch (parseErr: any) {
-        log.warn('Failed to parse structured response, falling back to raw text', { error: parseErr.message, rawText: ragResult.answerText.substring(0, 100) });
-        // Generate a fallback structured response for graceful degradation?
-        // For now, allow fallback to raw text which the UI handles, but ideally retry.
-        // Given constraints, we'll mark structuredAnswers as undefined so UI shows raw text (as per existing logic), 
-        // OR we could wrap the raw text in a single "General Answer" card.
+        log.error('✗ CRITICAL: Failed to parse questionnaire JSON after all recovery attempts', {
+          error: parseErr.message,
+          rawTextLength: ragResult.answerText.length,
+          preview: ragResult.answerText.substring(0, 250),
+        });
+        // IMPORTANT: Leave structuredAnswers as undefined.
+        // Frontend will receive raw text in 'answer' field and attempt its own advanced parsing.
+        // This prevents raw JSON from being displayed as plain text in chat bubble.
       }
     }
 

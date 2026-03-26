@@ -211,7 +211,7 @@ function normalizeStructuredAnswers(payload: unknown): StructuredAnswersResponse
 
   const source = payload as Record<string, unknown>;
   const rawAnswers = Array.isArray(source.answers) ? source.answers : null;
-  if (!rawAnswers) return null;
+  if (!rawAnswers || rawAnswers.length === 0) return null;
 
   const answers: StructuredAnswerItem[] = rawAnswers.map((item, index) => {
     const row = (item ?? {}) as Record<string, unknown>;

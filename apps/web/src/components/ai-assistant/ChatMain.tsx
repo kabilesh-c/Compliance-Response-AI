@@ -83,6 +83,16 @@ function tryParseStructuredResponse(text?: string | null): StructuredAnswersResp
     parsed = attemptParse(withoutTrailingCommas);
   }
 
+  // Additional recovery: fix unquoted keys
+  if (!parsed) {
+    const fixedKeys = cleaned
+      .replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":')
+      .replace(/,\s*}/g, "}")
+      .replace(/,\s*]/g, "]")
+      .replace(/\n/g, " ");
+    parsed = attemptParse(fixedKeys);
+  }
+
   if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as any).answers)) {
     return null;
   }
@@ -100,10 +110,12 @@ function tryParseStructuredResponse(text?: string | null): StructuredAnswersResp
         ? item.sources
         : [];
 
-    const citations = citationSource.map((c: any) => ({
-      document: typeof c?.document === "string" ? c.document : "Unknown",
-      page: typeof c?.page === "number" ? c.page : null,
-    }));
+    const citations = citationSource
+      .map((c: any) => ({
+        document: typeof c?.document === "string" ? c.document : "Unknown",
+        page: typeof c?.page === "number" ? c.page : null,
+      }))
+      .filter((c): c is { document: string; page: number | null } => !!c);
 
     return {
       questionNumber: typeof item?.questionNumber === "number" ? item.questionNumber : idx + 1,
