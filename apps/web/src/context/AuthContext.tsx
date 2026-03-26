@@ -23,10 +23,35 @@ export const useAuth = () => {
   return context;
 };
 
+// Wake up Render backend on app load (prevents cold start/sleep issues)
+const wakeUpBackend = async () => {
+  try {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://pharmacy-api.onrender.com/api';
+    // Extract base URL (remove /api path if present)
+    const baseUrl = apiUrl.replace('/api', '') || 'https://pharmacy-api.onrender.com';
+    
+    // Fire-and-forget request with short timeout (doesn't block page load)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    
+    fetch(`${baseUrl}/health`, { 
+      method: 'GET',
+      signal: controller.signal
+    }).finally(() => clearTimeout(timeoutId));
+  } catch (err) {
+    // Backend might still be asleep, that's okay - this just gives it a head start
+  }
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const { login: storeLogin, logout: storeLogout } = useAuthStore();
+
+  // Wake up backend on app load (runs once on mount)
+  useEffect(() => {
+    wakeUpBackend();
+  }, []);
 
   useEffect(() => {
     // Subscribe to Firebase auth state changes
